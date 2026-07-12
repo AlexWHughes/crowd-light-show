@@ -21,6 +21,8 @@
 
 **🎥 See it in action (6 min):** [Watch on GitHub](https://github.com/AndriiShramko/crowd-light-show/blob/main/public/shots/promo.mp4) · [Watch on YouTube (mirror)](https://youtu.be/lqK1PEZY50A)
 
+**🐱 Coming next — Cat Conga:** when the show ends, the crowd falls into a shared 3D (Gaussian-Splatting) world as cats forming one giant conga chain, then finds each other in the *real* crowd. [Design docs](docs/game/README.md) (planned, not built yet).
+
 ---
 
 ## 20-second demo (self-hosted)
