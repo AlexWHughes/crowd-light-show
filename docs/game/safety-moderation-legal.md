@@ -27,7 +27,7 @@ Lessons from Club Penguin (Ultimate Safe Chat), Among Us (guests get Quick Chat 
 3. **DSA applies even to a micro-operator** (art. 19 lifts Section 3, but not arts. 11–18): public point of contact, moderation rules in the ToS in plain language (including "moderation is algorithmic"), a notice-and-action report mechanism, a **statement of reasons for every ban** (what rule, was it automated, how to appeal — a human answers appeals).
 4. **Anonymous ≠ outside GDPR**: session tokens, IPs, chat content are personal data. Legal bases: 6(1)(b) for the game, 6(1)(f) for moderation (documented LIA). Retention: chat auto-deleted ≤24 h after the event; moderation logs ≤30 days; incident evidence until handover to authorities.
 5. **Minors**: rules state 13+/16+ (PL digital consent age is 16); no targeting of children; IRL-meetup safety-by-design is the central risk block (grooming, KK art. 200a) — hence the invite feature flag.
-6. **Avatar IP**: internet reference images are style inspiration only; production assets are generated with a paid tool granting full ownership (e.g. Meshy paid plan), prompts/dates archived; no imitation of any single artist's recognizable character.
+6. **Avatar IP**: internet reference images are style inspiration only; production assets are self-made (procedural low-poly) or generated on a free tier under CC BY 4.0 with attribution (e.g. "Model created with Meshy" in NOTICE), prompts/dates archived; no imitation of any single artist's recognizable character.
 
 ## What the build agent may do vs. the operator
 

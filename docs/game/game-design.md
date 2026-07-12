@@ -34,7 +34,7 @@ Open (pushed from the light show tab) → you are already a cat in the crowd (ze
 
 ## Avatars — no gender fields
 
-No "gender" field anywhere. An avatar is assigned randomly; switch with one tap. Two visual presets of the same scruffy ink-black yellow-eyed cat: **A "tufty"** (spiky fur, short scarf) and **B "tassels"** (fluffier silhouette, ear tassels). No labels — just a picture switcher. Accessories later stack on either preset. No names (number + chain color only) → no nickname moderation problem. All production assets are generated in-house (paid-plan generation tool, full ownership) — internet reference images are style inspiration only.
+No "gender" field anywhere. An avatar is assigned randomly; switch with one tap. Two visual presets of the same scruffy ink-black yellow-eyed cat: **A "tufty"** (spiky fur, short scarf) and **B "tassels"** (fluffier silhouette, ear tassels). No labels — just a picture switcher. Accessories later stack on either preset. No names (number + chain color only) → no nickname moderation problem. Production assets are created by the build agent itself — procedural low-poly cats, or a free-tier generation tool under CC BY with attribution; internet reference images are style inspiration only, never copied.
 
 ## Metrics
 

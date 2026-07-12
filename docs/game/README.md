@@ -18,7 +18,7 @@ No app install. No accounts. Mobile browser only — the same tab that just ran 
 
 ## Build phases
 
-- **Phase A — Delivery & rendering:** new isolated container + CDN pipeline + Spark renderer + Cache API + FPS-probe with 2D fallback. Closed by a **mandatory real-phone gate** (≥25 fps for 10 min on a mid-range Android and an iPhone).
+- **Phase A — Delivery & rendering:** new isolated container + splat delivery from the existing box (≤15 MB world, rate-limited, immutable/206; CDN only as a scaling option) + Spark renderer + Cache API + FPS-probe with 2D fallback. Closed by an **agent-run emulator self-gate** (Android emulator ≥25 fps for 10 min + CPU-throttled probe; residual iPhone/thermal risk honestly logged for the live event).
 - **Phase B — Multiplayer core:** authoritative WS server (8 Hz tick), AOI with hard neighbor cap, backpressure, load-proven at 1500–2000 concurrent clients.
 - **Phase C — The chain:** polyline-based conga model, segment leaders every 25–50 links, leader handover, reconnect grace, collision mask.
 - **Phase D — Handoff & game shell:** push from the light show, textless onboarding (<15 s to first joy), identify-me, preset chat, milestone effects, kill-switch, metrics.
