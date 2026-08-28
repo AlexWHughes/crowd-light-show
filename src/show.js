@@ -287,7 +287,9 @@ export class ShowHub {
     h.setPreset(channel, next);
     h.broadcast({ t: 'preset', ...next });
     if (h.isMain) this.broadcastState();
-    return h.isMain ? { ok: true, epoch } : { ok: true, epoch, members: h.members.size };
+    // startedAt goes back to the caller so the console can render its Live preview off the SAME
+    // clock anchor the phones use, instead of a local animation clock that drifts out of phase.
+    return h.isMain ? { ok: true, epoch, startedAt: next.startedAt } : { ok: true, epoch, startedAt: next.startedAt, members: h.members.size };
   }
 
   // A single param tweak: morph WITHOUT bumping epoch/startedAt (phase preserved).

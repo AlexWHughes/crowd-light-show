@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-29
+
+Four things the round-16 build got wrong, found on a real console.
+
+### Fixed
+
+- **The VJ pult went dead while the microphone was the source.** Both manual gates (pure-manual colour, and the FLASH pad) ask for a running show — and switching to the microphone deliberately STOPS the internal show, because there is no track to run. So the room sat at `idle` while the crowd was very much live, and the pult did nothing. The microphone source now counts as live for those gates. STOP still darkens the crowd, because it releases the manual override in the same breath — proven by a check that STOPs while the microphone is still selected.
+- **"Live preview" showed something other than what the phones were doing.** It rendered on a LOCAL animation clock, with a crowd of one and no VJ layer at all, so it was never in phase with any phone and ignored manual/palette entirely. It now renders exactly the way a phone does: the room's own preset anchor (`startedAt`, newly returned by the preset endpoints and picked up from the room broadcast) on the synced clock, the loudness the crowd actually received (the microphone level is re-smoothed with the phone's own 45 ms / 160 ms attack-release, since the phones see a smoothed 20 Hz stream and not this device's instantaneous level), the manual and palette layers, then the same two governors in the same order. Measured against a real phone, time-aligned within 25 ms: median luminance difference **0.000**, p90 **0.003** — it was up to a full swing apart before.
+- **The operator heard one track while the phones played another.** The personal console carries a visible `<audio>` scrubber with its own controls, and every transport action silences it (GO pauses and mutes it, Pause and Stop pause it) — but the round-16 Music-source switch did not, so it kept playing the old file while the crowd followed the room. Switching source now silences it the same way, in both directions. Reproduced first (the element ran on from 1.1 s to 3.8 s while the crowd moved to the microphone), then fixed.
+- **The sensitivity slider bottomed out at 0.4x**, so the microphone could never be turned down to nothing. It now reaches 0, and a zero is kept as a zero rather than falling back to 1.
+
+Covered by `test/round16_fixes.mjs`, which fails against 0.18.0 and passes against this build.
+
+
 ## [0.18.0] - 2026-08-28
 
 (0.17.0 was already taken on the remote by the Cat Conga game-module MVP tag on `origin/game/phase-d`.)

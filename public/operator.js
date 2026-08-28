@@ -271,6 +271,15 @@
     if (sel && plMode === 'selected') applyPlMode('selected'); // re-post the new selection
   });
 
+  // Test/telemetry seam, alongside __opMic / __opVJ / __opPreview: what THIS console believes is
+  // armed and loaded, so a harness can compare it against what the room actually told the phones.
+  window.__opState = {};
+  function opStateTele() {
+    window.__opState.armedId = armedId; window.__opState.pubTrackId = pubTrackId; window.__opState.soundOn = soundOn;
+    window.__opState.plMode = plMode; window.__opState.plNow = plNow; window.__opState.plNext = plNext;
+    window.__opState.plSelected = plSelected; window.__opState.curState = curState; window.__opState.audioReady = !!(audio && audio.ready && audio.ready());
+  }
+
   function renderState(st) {
     var prevState = curState;
     curState = st.status;
@@ -513,6 +522,7 @@
     if (!PUBLIC) {
       if (m.t === 'count') {
         gaPeakUpdate(m.audience);
+        crowdN = Math.max(1, m.audience | 0);
         $('count').textContent = m.audience; if ($('countBig')) $('countBig').textContent = m.audience;
         var ts = $('torchSplit');
         if (ts) ts.textContent = 'Flash reach: ' + (m.torchCapable || 0) + ' Android (camera-LED) · ' + (m.screenOnly || 0) + ' iPhone/other (screen-only)';
@@ -523,8 +533,22 @@
     }
     // ---- public console: derive transport state from the room messages it receives ----
     if (m.t === 'welcome' || m.t === 'state') { if (m.state) { renderState({ status: m.state.status }); if (m.state.status === 'running' && m.state.T0 != null) { pubT0 = m.state.T0; lastT0 = m.state.T0; if (audio && soundOn) audio.start(pubT0); } } return; }
-    if (m.t === 'index') { var n = Math.max(0, (m.total | 0) - 1); gaPeakUpdate(n); if ($('count2')) $('count2').textContent = n; if ($('countBig')) $('countBig').textContent = n; return; } // -1: the console itself is a member
+    // crowdN is the FULL index space the phones are numbered in — the console itself holds one of
+    // those slots, so the Live preview must use the same N the phones get, not the displayed count.
+    if (m.t === 'index') { var n = Math.max(0, (m.total | 0) - 1); crowdN = Math.max(1, m.total | 0); gaPeakUpdate(n); if ($('count2')) $('count2').textContent = n; if ($('countBig')) $('countBig').textContent = n; return; } // -1: the console itself is a member
     if (m.t === 'timeline') { var chg = (m.trackId !== pubTrackId); pubTrackId = m.trackId; consoleTimeline = m.data || null; seekSetDur(m.data && m.data.durationMs); if (chg && soundOn && typeof m.trackId === 'number') reloadConsoleSound(m.trackId); return; } // round 13 (pt 4/7): cues for the Live preview + seek range
+    if (m.t === 'preset' && m.channel !== 'torch') {
+      // Adopt the ROOM's screen preset, not just its anchor. If the look was changed by anything other
+      // than this console's own click — the host's default applied on open, another operator, an OSC
+      // bridge — the preview was still rendering the preset this tab last picked, which is exactly how
+      // it ends up showing something the phones are not doing. Params are only taken on a TYPE change,
+      // so an in-progress slider drag is never stomped by its own echo.
+      if (m.startedAt != null) activeStartedAt = m.startedAt;
+      if (m.type && m.type !== 'off' && presetSchema && presetSchema[m.type]) {
+        if (m.type !== activeType) { activeType = m.type; activeParams = Object.assign({}, m.params || {}); try { renderParams(); highlightPreset(); pvReset(); pvShow(true); } catch (e) {} }
+      } else if (m.type === 'off') { activeType = null; try { highlightPreset(); pvShow(false); } catch (e) {} }
+      return;
+    }
     if (m.t === 'playlist') { // round 10: the room advanced (or mode changed) — follow now/next
       plMode = m.mode || plMode; plNow = m.nowId; plNext = m.nextId; if (Array.isArray(m.selected)) plSelected = m.selected;
       if (m.nowId != null && m.nowId !== armedId) { armedId = m.nowId; loadPublic(); } else renderPlaylistCtl();
@@ -619,6 +643,11 @@
 
   // ---- live presets (studio) ----
   var presetSchema = null, activeType = null, activeParams = {};
+  // round 16 fix: the preview used a LOCAL animation clock, N=1, and ignored the VJ layer entirely, so
+  // it showed a different colour from every phone in the room. Remember WHEN the live preset started
+  // (server clock) so the preview can be rendered off the same anchor the phones use.
+  var activeStartedAt = null;
+  var crowdN = 1;   // phones in the room, so spatial presets preview as the SPREAD the crowd actually shows
   function defParams(type) { var o = {}, ps = presetSchema[type].params; for (var k in ps) o[k] = ps[k].def; return o; }
 
   var PV = window.CLS_PRESETS;
@@ -644,10 +673,46 @@
     if (curState === 'running' && lastT0 != null && clock && clock.ready) return ((clock.serverNow() - lastT0) % dur + dur) % dur;
     return null;
   }
+  // EXACTLY what a phone paints right now: same preset math, same synced clock + startedAt, same
+  // loudness, same manual/palette layer, same governors in the same order as public/audience.js.
+  // Returns null when the crowd's colour is not knowable here (no preset, or the clock is not synced).
+  function crowdRgbNow(dtMs, idx, total, backstop) {
+    if (!PV || !(clock && clock.ready)) return null;
+    if (curState === 'blackout') return [0, 0, 0];
+    var v = window.__opVJ || null;
+    var manOn = !!(v && v.on), pal = (v && v.palette && v.palette.on && v.palette.colors && v.palette.colors.length) ? v.palette : null;
+    var live = curState === 'running' || micOn;
+    var raw = null;
+    if (manOn && v.mode === 'full' && live) {
+      raw = PV.hsl2rgb(v.hue, v.sat, v.bri * 0.85 + 0.04);        // pure manual, exactly as the phone maps it
+    } else if (activeType && presetSchema && presetSchema[activeType] && activeStartedAt != null) {
+      raw = PV.PRESETS[activeType](clock.serverNow() - activeStartedAt, activeParams, idx || 0, total || 1, simLoudness());
+      if (manOn) raw = PV.applyManualScreen(raw, { on: true, mode: v.mode, sat: v.sat, hue: v.hue, bri: v.bri, flash: v.flash });
+    } else {
+      var p = consolePos(), c = p != null && curState === 'running' ? sampleCueAt(p) : null;   // no preset: the timeline colour
+      if (!c) return [0, 0, 0];
+      raw = [c.rgb[0] * c.b, c.rgb[1] * c.b, c.rgb[2] * c.b];
+    }
+    if (pal) raw = PV.paletteSnap(raw, pal);
+    var rgb = PV.clampColor(raw);                                  // governor #1, as on the phone
+    if (backstop) rgb = backstop(rgb, dtMs);                       // governor #2, as on the phone
+    return rgb;
+  }
+
+  // Mirror of public/audience.js micTick: advance the previewed level toward the value we last SENT,
+  // with the phone own 45 ms attack / 160 ms release. This is what the crowd is rendering.
+  function micPreviewTick(nowMs) {
+    var dt = micPrevAt ? Math.max(1, Math.min(200, nowMs - micPrevAt)) : 16; micPrevAt = nowMs;
+    if (!micOn) { micPreviewLevel = 0; return; }
+    var tau = micSentLevel > micPreviewLevel ? 45 : 160;
+    micPreviewLevel += (1 - Math.exp(-dt / tau)) * (micSentLevel - micPreviewLevel);
+    micPreviewLevel = micPreviewLevel < 0 ? 0 : (micPreviewLevel > 1 ? 1 : micPreviewLevel);
+  }
+
   function simLoudness() {
     // round 16: with the MICROPHONE as the source there is no track position to sample — the preview
-    // must follow the live level, or the operator is driving the crowd blind.
-    if (micOn) return micLevel;
+    // must follow the live level the CROWD received, or the operator is driving the crowd blind.
+    if (micOn) return micPreviewLevel;
     if (curState !== 'running' || armedId == null) return 0;
     var p = consolePos(); if (p == null) return 0;
     var c = sampleCueAt(p); return c ? c.b : 0;
@@ -662,20 +727,34 @@
   function pvShow(on) { var w = $('presetPreviewWrap'); if (w) w.className = on ? '' : 'hidden'; }
   // The Live preview under Start/Stop (pt 7): the crowd's current screen colour when RUNNING with an
   // active preset; steady black when idle/stopped/blackout (no music reaction in silence).
-  function mainPreviewFrame() {
+  // One backstop per previewed phone: the >=150 ms slew is stateful, so sharing one across indices
+  // would smear them into each other and stop matching any real phone.
+  var mpBackstops = [], mpLast = 0, MP_MAX = 48;
+  function mainPreviewFrame(now) {
     var mp = $('mainPreview'); if (!mp) return; var mc = mp.getContext ? mp.getContext('2d') : null; if (!mc) return;
     if (!mp.width || mp.width < 8) { mp.width = mp.clientWidth || 320; mp.height = 48; }
-    var bg = '#000', lvl = 0;
-    if (curState === 'running' || micOn) {   // round 16: in mic mode the crowd is lit by a preset with no transport running
-      if (activeType && window.__opPreview && window.__opPreview.lastBg) { bg = window.__opPreview.lastBg; lvl = window.__opPreview.maxLum || 0; } // a preset overlay drives the crowd screen
-      else { var p = consolePos(), c = p != null ? sampleCueAt(p) : null; if (c) { bg = 'rgb(' + Math.round(c.rgb[0] * c.b) + ',' + Math.round(c.rgb[1] * c.b) + ',' + Math.round(c.rgb[2] * c.b) + ')'; lvl = c.b; } } // round 13 (pt 4): no preset -> show the music-reactive TIMELINE colour the crowd sees
+    micPreviewTick(now || 0);
+    var dt = mpLast ? Math.max(1, (now || 0) - mpLast) : 16; mpLast = now || mpLast;
+    // A SPATIAL preset makes different phones show different colours by design, so a single swatch can
+    // never be "what the crowd's screens are doing". Draw the crowd: one bar per phone, phone 0 first.
+    var n = Math.max(1, Math.min(MP_MAX, crowdN | 0));
+    var bars = [], w = mp.width / n, lvl = 0;
+    for (var i = 0; i < n; i++) {
+      if (!mpBackstops[i] && PV) mpBackstops[i] = PV.makeBackstop(150);
+      var c = crowdRgbNow(dt, i, Math.max(1, crowdN | 0), mpBackstops[i]);
+      var col = c ? ('rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')') : '#000';
+      if (c) lvl = Math.max(lvl, PV.relLum(c));      // the brightest phone right now — this is what "the crowd" reads as
+      bars.push(col);
+      mc.fillStyle = col; mc.fillRect(Math.floor(i * w), 0, Math.ceil(w) + 1, mp.height);
     }
-    mc.fillStyle = bg; mc.fillRect(0, 0, mp.width, mp.height);
-    window.__opMainPv = { bg: bg, level: lvl, running: curState === 'running' || micOn, hasTimeline: !!consoleTimeline, mic: micOn }; // test seam (pt 4 / round 16)
+    window.__opMainPv = { bg: bars[0], bars: bars, crowdN: crowdN, level: lvl,
+      running: curState === 'running' || micOn, hasTimeline: !!consoleTimeline, mic: micOn,
+      startedAt: activeStartedAt, synced: !!(clock && clock.ready) }; // test seam
   }
   function pvFrame(now) {
     requestAnimationFrame(pvFrame);
-    mainPreviewFrame(); // round 11 (pt 7): the small Live preview under Start/Stop
+    mainPreviewFrame(now); // round 11 (pt 7): the small Live preview under Start/Stop
+    opStateTele();       // keep the console telemetry seam current
     seekTick();          // round 13 (pt 7): keep the seek slider following the play position
     if (!pvCtx || !PV || !activeType || !presetSchema || !presetSchema[activeType]) return;
     if (!pvCanvas.width || pvCanvas.width < 8) { pvCanvas.width = pvCanvas.clientWidth || 320; pvCanvas.height = 56; }
@@ -749,7 +828,7 @@
     pvReset(); pvShow(true);
     api('/api/operator/preset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: type, params: activeParams }) })
       .then(function (r) { return r.json(); })
-      .then(function (j) { $('presetMsg').textContent = j.ok ? ('● LIVE: ' + presetSchema[type].label + ' — epoch ' + j.epoch) : ('Error: ' + (j.error || '')); });
+      .then(function (j) { if (j && j.startedAt != null) activeStartedAt = j.startedAt; $('presetMsg').textContent = j.ok ? ('● LIVE: ' + presetSchema[type].label + ' — epoch ' + j.epoch) : ('Error: ' + (j.error || '')); });
   }
   function loadPresets() {
     api('/api/operator/presets').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
@@ -759,7 +838,7 @@
         var b = document.createElement('button'); b.style.width = 'auto'; b.textContent = d.schema[type].label; b.setAttribute('data-preset', type); box.appendChild(b);
       });
       var off = document.createElement('button'); off.style.width = 'auto'; off.className = 'ghost'; off.textContent = '■ Off'; off.setAttribute('data-preset', 'off'); box.appendChild(off);
-      if (d.active && d.active.type && d.active.type !== 'off') { activeType = d.active.type; activeParams = Object.assign({}, d.active.params); renderParams(); pvReset(); pvShow(true); }
+      if (d.active && d.active.type && d.active.type !== 'off') { activeType = d.active.type; activeParams = Object.assign({}, d.active.params); activeStartedAt = d.active.startedAt; renderParams(); pvReset(); pvShow(true); }
       else if (PUBLIC && DEFAULTS && DEFAULTS.screen && DEFAULTS.screen.type && DEFAULTS.screen.type !== 'off') { pickPreset(DEFAULTS.screen.type); } // public: start on the host's default look (round 13 pt 8: 'off' => Live presets default OFF, lights run the timeline)
       highlightPreset();
       setupTorch(d);
@@ -919,6 +998,11 @@
   var micOn = false, micStarting = false, micWsAuthed = false, micAGC = null, micGainV = 1;
   var micWake = null, micHttpInFlight = false;
   var micLastAt = 0, micLastSend = 0, micLevel = 0, micRms = 0, micSent = 0;
+  // What the CROWD is actually acting on: the last value we put on the wire, smoothed with the same
+  // attack/release the phone applies (public/audience.js micTick). Without this the Live preview would
+  // react to this device instantaneous level while every phone reacts to a smoothed, 20 Hz version —
+  // the two would visibly disagree even though nothing is wrong.
+  var micSentLevel = 0, micPreviewLevel = 0, micPrevAt = 0;
   var MIC_HZ = 20;                       // frames/s pushed to the room (the server hard-caps at 30)
   window.__opMic = { on: false, authed: false, level: 0, rms: 0, rmsPeak: 0, sent: 0, err: null, transport: null }; // test seam (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
 
@@ -942,9 +1026,11 @@
   // be absurd on a phone); the HTTP route is the fallback while the socket is down or unelevated.
   function micSend(v) {
     if (ws && ws.readyState === 1 && (!PUBLIC || micWsAuthed)) {
+      micSentLevel = v;
       try { ws.send(JSON.stringify({ t: 'op', cmd: 'lvl', v: v })); micSent++; window.__opMic.sent = micSent; window.__opMic.transport = 'ws'; } catch (e) { /* drop this frame */ }
       return;
     }
+    micSentLevel = v;
     window.__opMic.transport = 'http';
     if (micHttpInFlight) return;   // single-flight: without this the fallback piles up 20 requests/s while the socket is down
     micHttpInFlight = true;
@@ -1038,10 +1124,13 @@
         // while the microphone is the source, and say so out loud if we lose visibility anyway.
         try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (w) { micWake = w; })['catch'](function () {}); } catch (e) {}
         ga('mic_source', { on: 1 });
-        // Hand the lights over: stop the internal track (both the crowd's copy and this monitor) so
-        // the two sources can never fight, then switch the source and re-light with a reactive preset.
+        // Hand the lights over: stop the internal track — on the crowd AND on BOTH of this console's
+        // own sound sources. The visible <audio> scrubber is a real player with its own controls, and
+        // every other transport action (#go/#pause/#stop) silences it; if the source switch does not,
+        // it keeps playing the old file and the operator hears a different track from the crowd.
         tx('stop', {});
         if (audio) { try { audio.stop(); } catch (e) {} }
+        silenceLocalPlayer();
         setTimeout(function () { tx('mic', { on: true }); micEnsureReactive(); }, 250);
         srcMsg(tr('console.mic_live', 'LIVE from the microphone — the crowd follows what this device hears.'));
         micRaf = requestAnimationFrame(micFrame);
@@ -1054,6 +1143,11 @@
       });
   }
 
+  // Silence the console's own visible <audio> element (see micStart): the same thing #stop does.
+  function silenceLocalPlayer() {
+    try { if (player) { player.pause(); player.currentTime = 0; player.muted = true; } } catch (e) {}
+  }
+
   function micStop(quiet) {
     var was = micOn;
     micOn = false; micStarting = false;
@@ -1063,14 +1157,15 @@
     if (micCtx) { try { micCtx.close(); } catch (e) {} micCtx = null; }
     micAnalyser = null; micData = null; micAGC = null; micLevel = 0; micRms = 0;
     micMeterDraw(); renderSource();
-    if (was) { tx('mic', { on: false }); ga('mic_source', { on: 0 }); }
+    if (was) { silenceLocalPlayer(); tx('mic', { on: false }); ga('mic_source', { on: 0 }); }
     if (!quiet) srcMsg(tr('console.mic_off', 'Back to the internal music. Press Start (or GO) to play a track again.'));
   }
 
   if ($('srcMic')) $('srcMic').addEventListener('click', function () { micStart(); });
   if ($('srcInternal')) $('srcInternal').addEventListener('click', function () { micStop(false); });
   if ($('micGain')) $('micGain').addEventListener('input', function () {
-    micGainV = Number($('micGain').value) || 1;
+    var gv = Number($('micGain').value);
+    micGainV = (gv === gv) ? gv : 1;      // 0 is a legitimate setting — do NOT fall back to 1 on zero
     var v = $('micGainVal'); if (v) v.textContent = micGainV.toFixed(2) + '×';
   });
   // A backgrounded or closed console must not leave the crowd on a feed nobody is producing. The

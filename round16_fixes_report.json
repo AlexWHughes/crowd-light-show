@@ -1,0 +1,47 @@
+{
+  "base": "http://localhost:5301",
+  "checks": {
+    "mic_gain_reaches_zero": {
+      "ok": true,
+      "detail": "sensitivity slider min=\"0\" — it must be able to turn the microphone down to nothing"
+    },
+    "manual_works_in_mic_mode": {
+      "ok": true,
+      "detail": "with the microphone as the source, pure-manual white reached luminance 0.89, was neutral-grey in 14/14 samples and held the flash in 14/14"
+    },
+    "stop_still_darkens_in_mic_mode": {
+      "ok": true,
+      "detail": "after STOP: screen rgb(0,0,0), flash want 0, manual released true"
+    },
+    "preview_is_anchored_to_the_room": {
+      "ok": true,
+      "detail": "the console renders the preview off the room's own preset anchor (startedAt=51660.56970000267, clock synced=true)"
+    },
+    "preview_matches_the_crowd": {
+      "ok": true,
+      "detail": "the console's bar for phone #1 vs that phone itself, time-aligned within 25 ms over 240 pairs: median |dL| 0.000, p90 0.000 (a free-running preview drifts across the whole range)"
+    },
+    "preview_has_a_bar_per_phone": {
+      "ok": true,
+      "detail": "3 bars for an index space of 3; the two phones sit at [1,2]"
+    },
+    "every_phone_matches_its_own_bar": {
+      "ok": true,
+      "detail": "both phones tracked their own bar in the console strip across 8 samples"
+    },
+    "source_switch_silences_the_operators_own_player": {
+      "ok": true,
+      "detail": "the console's <audio> was playing (t=1.2s) and the source switch stopped it (paused=true, t=0.0s, muted=true)"
+    },
+    "switch_back_leaves_the_player_silent": {
+      "ok": true,
+      "detail": "coming back from the microphone does not resurrect the old file behind the operator's back"
+    },
+    "no_console_page_errors": {
+      "ok": true,
+      "detail": "the console threw nothing through the whole flow"
+    }
+  },
+  "fails": [],
+  "ok": true
+}

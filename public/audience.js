@@ -649,10 +649,12 @@
       // operator BLACKOUT overrides everything — go dark immediately.
     } else if (fxActive) {
       finalRgb = fxScreen; flum = P.relLum(finalRgb); playing = true; epochNow = fx.epoch; setStatus('st_play');
-    } else if (manual.on && manual.mode === 'full' && P && runState.status !== 'idle') {
+    } else if (manual.on && manual.mode === 'full' && P && (runState.status !== 'idle' || micMode)) {
       // round 14: PURE MANUAL ("presets OFF") — the screen colour is the operator's HSV directly. It is
       // gated on a live show (not idle/stopped; blackout is already excluded above) so STOP genuinely
-      // darkens the crowd even if a latched manual frame outlives the stop broadcast.
+      // darkens the crowd even if a latched manual frame outlives the stop broadcast. round 16: the
+      // MICROPHONE source is a live show too — it just has no track — so it counts as live here; STOP
+      // still darkens because it releases the manual override in the same breath.
       // globally identical (no clock needed), snapped to the palette, then run through the SAME governors.
       var rawF = P.hsl2rgb(manual.hue, manual.sat, manual.bri * 0.85 + 0.04); // map V into the governed L-band
       rawF = paletteSnap(rawF, palette);
@@ -754,7 +756,7 @@
     // round 14: the manual FLASH slider composes here, BEFORE the unchanged torchGate. fx still wins
     // (fxTorchOverride). In 'full' mode the slider is authoritative; in 'intervene' it can ADD a flash on
     // top of (or without) a torch preset. iOS has no torchTrack -> applyTorch is a no-op, screen untouched.
-    if (manual.on && fxTorchOverride == null && runState.status !== 'blackout' && runState.status !== 'idle') {
+    if (manual.on && fxTorchOverride == null && runState.status !== 'blackout' && (runState.status !== 'idle' || micMode)) {
       // round 14 fix: gated on NOT idle (and not blackout) so a latched manual FLASH cannot keep the camera
       // LED solid-on after STOP — makeTorchGate only rate-limits new ON-edges, it never releases a held one.
       if (manual.mode === 'full') wantOn = manual.flash >= 0.5;          // pure manual: the slider decides
