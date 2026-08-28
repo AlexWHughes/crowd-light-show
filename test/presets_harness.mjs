@@ -135,11 +135,11 @@ async function main() {
   await cs.goto(`${BASE}/join`); // NO auto -> consent gate
   await cs.waitForTimeout(800);
   const reach = await cs.evaluate(() => {
-    const a = document.getElementById('agree'), jb = document.getElementById('joinScreen');
+    const a = document.getElementById('agreeBtn'), jb = document.getElementById('joinScreen');
     const st = document.getElementById('stage');
     return { hasAgree: !!a, hasJoin: !!jb, scrollable: st ? st.scrollHeight >= st.clientHeight : false };
   });
-  await cs.check('#agree');
+  await cs.click('#agreeBtn');   // round 15c: ONE big confirm button reveals the join buttons (was a checkbox)
   const joinEnabled = await cs.evaluate(() => !document.getElementById('joinScreen').disabled);
   await cs.click('#joinScreen'); // Playwright auto-scrolls — fails if unreachable
   await cs.waitForTimeout(400);

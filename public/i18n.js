@@ -17,6 +17,8 @@
       left_h: 'Wyszedłeś z pokazu', rejoin: 'Dołącz ponownie', stop: 'Stop',
       st_conn: 'łączenie…', st_sync: 'synchronizacja…', st_ready: 'gotowe • tryb ekranu', st_ready_t: 'gotowe • ekran + latarka', st_play: 'gra ▶', st_wait: 'czekam na start…', st_paused: 'pauza', st_resume: 'Dotknij, aby wrócić — nie blokuj ekranu',
       audio_btn: '🔊 Odtwórz muzykę też na moim telefonie', audio_on: '🔊 Muzyka włączona — w rytmie z resztą', audio_connecting: '🔊 Łączę z muzyką…', audio_mute: '🔊 Wycisz muzykę', audio_unmute: '🔇 Włącz muzykę', st_full: 'komplet — ponawiam…',
+      // round 16 (#1): the share-this-show QR painted on the live screen
+      qr_cap: 'Podziel się pokazem — zeskanuj kod', qr_show: '🔗 Kod QR', qr_hide: 'Ukryj kod QR',
     },
     en: {
       title: 'Crowd Light Show', sub: 'Your phone becomes part of one light show synchronized to the music.',
@@ -33,6 +35,8 @@
       left_h: 'You left the show', rejoin: 'Join again', stop: 'Stop',
       st_conn: 'connecting…', st_sync: 'syncing…', st_ready: 'ready • screen mode', st_ready_t: 'ready • screen + torch', st_play: 'playing ▶', st_wait: 'waiting for start…', st_paused: 'paused', st_resume: 'Tap to return — keep the screen on',
       audio_btn: '🔊 Play the music on my phone too', audio_on: '🔊 Music on — in sync with the crowd', audio_connecting: '🔊 Connecting to music…', audio_mute: '🔊 Mute music', audio_unmute: '🔇 Unmute music', st_full: 'venue full — retrying…',
+      // round 16 (#1): the share-this-show QR painted on the live screen
+      qr_cap: 'Share this show — scan this code', qr_show: '🔗 QR code', qr_hide: 'Hide the QR code',
     },
   };
   // Language pick (round 11, pt 20): honor the SHARED cls_lang the visitor chose on the landing /

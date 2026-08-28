@@ -1,0 +1,43 @@
+{
+  "base": "http://localhost:4102",
+  "checks": {
+    "all_mode_unchanged": {
+      "ok": true,
+      "detail": "mode=all order=[1,2,3]"
+    },
+    "selected_loops_only_ticked": {
+      "ok": true,
+      "detail": "ticked [1,3] -> order [1,3] (unticked #2 must be absent)"
+    },
+    "selected_next_is_ticked": {
+      "ok": true,
+      "detail": "now=1 next=3"
+    },
+    "selected_echoed_back": {
+      "ok": true,
+      "detail": "the server echoes the selection it actually stored: [1,3]"
+    },
+    "unticked_never_plays": {
+      "ok": true,
+      "detail": "five hops through the loop landed on [1,3,1,3,1] — never #2"
+    },
+    "empty_selection_is_not_all": {
+      "ok": true,
+      "detail": "empty tick list -> order [3] (was: the entire library), armed was #3"
+    },
+    "rejects_foreign_ids": {
+      "ok": true,
+      "detail": "[A, another room's guest id, null, {}, 'nope'] -> order [1]"
+    },
+    "guest_string_id_survives": {
+      "ok": true,
+      "detail": "ticking only the room's own upload -> order [\"g:97786b9dc0685d14:732fb0b824ab\"] (before the fix: the whole library)"
+    },
+    "one_mode_unchanged": {
+      "ok": true,
+      "detail": "mode=one order=[\"g:97786b9dc0685d14:732fb0b824ab\"]"
+    }
+  },
+  "fails": [],
+  "ok": true
+}

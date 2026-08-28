@@ -26,6 +26,14 @@
   function clampM(x, lo, hi, d) { x = Number(x); return (x !== x) ? d : x < lo ? lo : x > hi ? hi : x; }
   var myIndex = 0, N = 1;   // sticky index in the crowd + grid width
   var gameHandoff = { prefetched: false, going: false }; // Cat Conga handoff latches (game module, additive)
+  // round 16 (#2): LIVE MIC SOURCE. The operator switched the light source from the internal track
+  // to the MICROPHONE of the device they run the show from, so the crowd reacts to what the ROOM is
+  // hearing (a DJ, a band, the house PA). Loudness now arrives as ~20 Hz {t:'lvl'} frames instead of
+  // being read out of the pre-baked timeline; it feeds the SAME `level` slot sampleEnv() returns, so
+  // every screen/torch preset reacts unchanged and clampColor + backstop (<=3 fl/s) and torchGate
+  // (<=2.8/s) still run LAST — the epilepsy envelope is identical whichever source is playing.
+  var micMode = false, micTarget = 0, micLevel = 0, micAt = 0;
+  var MIC_STALE_MS = 1500;   // no frame for this long (console closed / offline) -> decay to 0 by ourselves
   var backstop = P ? P.makeBackstop(150) : null; // client-side safety slew (defense in depth)
   var torchGate = (P && P.makeTorchGate) ? P.makeTorchGate() : null; // torch rate cap <=2.8/s (defense in depth)
   // round 13 (pt 3): a per-phone TORCH AGC. The torch read the AGC'd cue brightness but then re-flattened
@@ -63,6 +71,45 @@
   var joinScreen = document.getElementById('joinScreen');
   var joinTorch = document.getElementById('joinTorch');
   var brightToast = document.getElementById('brightToast');
+  // round 16 (#1): the SHARE-THIS-SHOW QR overlay (markup in audience.html, sizing in style.css).
+  var qrWrap = document.getElementById('shareQr'), qrBox = document.getElementById('shareQrBox');
+  var qrHide = document.getElementById('shareQrHide');
+  var qrImg = document.getElementById('shareQrImg'), qrPill = document.getElementById('shareQrPill');
+  // Hidden/shown is a per-DEVICE preference: somebody who does not want the code over their light
+  // show should not have to dismiss it again at the next show, or after a reload.
+  var qrCollapsed = false;
+  try { qrCollapsed = localStorage.getItem('cls_qr') === '0'; } catch (e) { /* private mode */ }
+  // The QR is generated SERVER-side for THIS room, so it always encodes the join URL of the show
+  // this phone is actually in — a studio room, the /try demo loop, or the owner's invited show.
+  function qrSrc() {
+    if (ROOM) return '/api/audience/qr?room=' + encodeURIComponent(ROOM);
+    if (DEMO) return '/api/audience/qr?demo=1';
+    return '/api/audience/qr';
+  }
+  function qrPaint() {
+    // BLACKOUT is the operator's kill switch: it must actually darken the crowd, and a solid white
+    // QR card on every screen would defeat it. The QR is therefore part of what BLACKOUT turns off.
+    var live = !!window.__cls.started && runState.status !== 'blackout';
+    if (qrWrap) { if (live && !qrCollapsed) qrWrap.classList.remove('hidden'); else qrWrap.classList.add('hidden'); }
+    if (qrPill) { if (live && qrCollapsed) qrPill.classList.remove('hidden'); else qrPill.classList.add('hidden'); }
+    window.__cls.qr = { shown: live && !qrCollapsed, collapsed: qrCollapsed, src: qrImg ? (qrImg.getAttribute('src') || null) : null };
+  }
+  function qrArm() {   // called once the phone has joined: fetch the PNG (cached an hour) and show it
+    if (qrImg && !qrImg.getAttribute('src')) qrImg.setAttribute('src', qrSrc());
+    if (qrBox) qrBox.setAttribute('aria-label', i18n.t('qr_cap'));
+    if (qrHide) qrHide.setAttribute('aria-label', i18n.t('qr_hide'));
+    if (qrPill) qrPill.setAttribute('aria-label', i18n.t('qr_show'));
+    qrPaint();
+  }
+  function qrSetCollapsed(v) {
+    qrCollapsed = !!v;
+    try { localStorage.setItem('cls_qr', v ? '0' : '1'); } catch (e) { /* private mode */ }
+    qrPaint();
+  }
+  // Two ways out and one way back: the explicit ✕, a tap anywhere on the card, and the corner pill.
+  if (qrHide) qrHide.addEventListener('click', function (e) { e.stopPropagation(); qrSetCollapsed(true); });
+  if (qrBox) qrBox.addEventListener('click', function () { qrSetCollapsed(true); });
+  if (qrPill) qrPill.addEventListener('click', function () { qrSetCollapsed(false); });
 
   // Test/telemetry hook (read by the Playwright sync harness). Every new path writes
   // here — it is the single machine-readable seam for verification.
@@ -71,7 +118,8 @@
     // round 8B: the two autonomous channels are independent readback seams (screen never moves the torch & vice-versa)
     screen: { preset: null, epoch: 0 }, torch: { preset: null, epoch: 0, on: 0, intensity: 0, capable: null, startedAt: 0 },
     synced: false, degraded: false, quality: null, audio: { wanted: false, ready: false, scheduled: false, preload: 'idle' },
-    manual: { on: false, mode: 'intervene', sat: 1, hue: 0, bri: 1, flash: 0 }, palette: { on: false, colors: [] } }; // round 14: VJ override + palette seams
+    manual: { on: false, mode: 'intervene', sat: 1, hue: 0, bri: 1, flash: 0 }, palette: { on: false, colors: [] }, // round 14: VJ override + palette seams
+    mic: { on: false, level: 0, target: 0, frames: 0 }, qr: { shown: false, collapsed: false, src: null } }; // round 16: mic source + share-QR seams
 
   var ws = null, clock = null, timeline = null;
   var runState = { status: 'idle', T0: null, epoch: 0, pausePos: 0 };
@@ -182,6 +230,7 @@
     stopBtn.classList.remove('hidden'); stopBtn.textContent = i18n.t('stop');
     setStatus('st_conn');
     showBrightToast();             // non-blocking reminder to max brightness (can't set it for them)
+    qrArm();                       // round 16 (#1): the room's own join QR, so a neighbour can scan this screen
     requestFullscreen();
     acquireWake();
     if (withTorch) startTorch();
@@ -279,8 +328,8 @@
     }
     if (m.t === 'start') { runState = { status: 'running', T0: m.T0, epoch: m.epoch, pausePos: 0, loop: !!m.loop }; window.__cls.status = 'running'; window.__cls.gotStart = m.T0; window.__cls.loop = !!m.loop; prevLum = 0; flashArmed = true; if (audio && audioOn) playRoomAudio(m.T0); setStatus('st_play'); showWave(); return; }
     if (m.t === 'pause') { runState.status = 'paused'; runState.pausePos = m.pos; window.__cls.status = 'paused'; if (audio) audio.stop(); setStatus('st_paused'); return; }
-    if (m.t === 'stop') { runState = { status: 'idle', T0: null, epoch: m.epoch, pausePos: 0 }; preset = null; torchPreset = null; fx = null; window.__cls.fx = null; window.__cls.preset = null; window.__cls.screen.preset = null; window.__cls.torch.preset = null; window.__cls.status = 'idle'; manual = { on: false, mode: 'intervene', sat: 1, hue: 0, bri: 1, flash: 0 }; window.__cls.manual = manual; palette = { on: false, colors: [] }; window.__cls.palette = palette; if (audio) audio.stop(); hideWave(); setStatus('st_wait'); return; } // round 14: STOP also drops a latched VJ manual override + palette (mirror of the server release)
-    if (m.t === 'blackout') { runState = { status: 'blackout', T0: null, epoch: m.epoch }; preset = null; torchPreset = null; fx = null; window.__cls.fx = null; window.__cls.preset = null; window.__cls.screen.preset = null; window.__cls.torch.preset = null; window.__cls.status = 'blackout'; hideWave(); return; } // round 13 (pt 6): BLACKOUT kills lights+torch only — the MUSIC keeps playing (audio untouched)
+    if (m.t === 'stop') { runState = { status: 'idle', T0: null, epoch: m.epoch, pausePos: 0 }; setTimeout(qrPaint, 0); preset = null; torchPreset = null; fx = null; window.__cls.fx = null; window.__cls.preset = null; window.__cls.screen.preset = null; window.__cls.torch.preset = null; window.__cls.status = 'idle'; manual = { on: false, mode: 'intervene', sat: 1, hue: 0, bri: 1, flash: 0 }; window.__cls.manual = manual; palette = { on: false, colors: [] }; window.__cls.palette = palette; if (audio) audio.stop(); hideWave(); setStatus('st_wait'); return; } // round 14: STOP also drops a latched VJ manual override + palette (mirror of the server release)
+    if (m.t === 'blackout') { runState = { status: 'blackout', T0: null, epoch: m.epoch }; qrPaint(); preset = null; torchPreset = null; fx = null; window.__cls.fx = null; window.__cls.preset = null; window.__cls.screen.preset = null; window.__cls.torch.preset = null; window.__cls.status = 'blackout'; hideWave(); return; } // round 13 (pt 6): BLACKOUT kills lights+torch only — the MUSIC keeps playing (audio untouched)
     // ---- studio: live parametric presets ----
     if (m.t === 'index') { myIndex = m.index | 0; N = Math.max(1, m.total | 0); window.__cls.idx = myIndex; window.__cls.total = N; return; }
     if (m.t === 'marquee') { // round 11 (pt 19): scrolling text overlay — text ONLY, never touches the flash/preset/run-state
@@ -324,6 +373,22 @@
       palette = { on: !!m.on && cols.length > 0, colors: cols };
       window.__cls.palette = palette; return;
     }
+    // round 16 (#2): the live mic source. 'micMode' flips the source; 'lvl' is one loudness frame.
+    // Both are inert until an operator explicitly switches the source, so the MAIN show path is
+    // byte-identical when nobody uses the microphone.
+    if (m.t === 'micMode') {
+      micMode = !!m.on;
+      if (!micMode) { micTarget = 0; micLevel = 0; }
+      window.__cls.mic.on = micMode; window.__cls.mic.level = micLevel; window.__cls.mic.target = micTarget;
+      return;
+    }
+    if (m.t === 'lvl') {
+      if (!micMode) return;                                  // a stray frame can never light a room that isn't listening
+      var lv = Number(m.v);
+      micTarget = (lv >= 0 && lv <= 1) ? lv : 0;             // NaN/out-of-range -> silence, never a full-brightness surprise
+      micAt = performance.now(); window.__cls.mic.frames++;
+      return;
+    }
     // Cat Conga handoff (game module, additive): two message types the show never emits on its own —
     // only an explicit operator action sends them, so MAIN show behaviour stays byte-identical.
     if (m.t === 'prefetch') { // warm the browser HTTP cache for the game world, randomized across the show window so the crowd never stampedes the box
@@ -361,6 +426,8 @@
 
   function applyState(s) {
     runState.status = s.status; runState.T0 = s.T0; runState.epoch = s.epoch; runState.pausePos = s.pausePos || 0; runState.loop = !!s.loop;
+    // a state echo can end (or start) a blackout — keep the QR overlay in step with the run state
+    setTimeout(qrPaint, 0);
     window.__cls.status = s.status; window.__cls.loop = !!s.loop;
     prevLum = 0; flashArmed = true; // late-join: don't suppress the first legitimate flash
     if (s.status === 'running' && s.T0 != null && audio && audioOn) playRoomAudio(s.T0); // late-join audio
@@ -517,11 +584,27 @@
     return { b: a.b + (b.b - a.b) * f, rgb: [a.rgb[0] + (b.rgb[0] - a.rgb[0]) * f, a.rgb[1] + (b.rgb[1] - a.rgb[1]) * f, a.rgb[2] + (b.rgb[2] - a.rgb[2]) * f] };
   }
 
+  // 20 Hz in, 60 fps out: interpolate between frames so the light BREATHES instead of stepping.
+  // Fast attack keeps a beat punchy; a slower release stops the gap between frames reading as a
+  // strobe. The watchdog is the safety half: if the operator's console dies mid-show the level
+  // decays to 0 on its own instead of freezing the crowd at whatever the last frame said.
+  function micTick(dtMs) {
+    if (!micMode) { if (micLevel !== 0) { micLevel = 0; window.__cls.mic.level = 0; } return; }
+    if (micAt && (performance.now() - micAt) > MIC_STALE_MS) micTarget = 0;
+    var tau = micTarget > micLevel ? 45 : 160;
+    micLevel += (1 - Math.exp(-Math.max(1, Math.min(200, dtMs)) / tau)) * (micTarget - micLevel);
+    micLevel = micLevel < 0 ? 0 : (micLevel > 1 ? 1 : micLevel);
+    window.__cls.mic.level = micLevel; window.__cls.mic.target = micTarget;
+  }
+
   // The music's governed loudness at the current TRACK position — the deterministic,
   // already-safe (<=3 fl/s) signal that makes presets react to the song while staying
   // perfectly in sync (every phone samples the same cue b at the same synced trackPos).
   // Neutral (level 0) whenever no track is running -> presets behave exactly as before.
   function sampleEnv() {
+    // round 16 (#2): the operator switched the source to their device's microphone — the live level
+    // REPLACES the timeline read (there is no track position to sample; the music is in the room).
+    if (micMode) return { level: micLevel, active: true, trackPos: -1 };
     // round 12 (pt 5): the DEMO drives its timeline off demoT0 (modulo loop), NOT runState.T0 — so the
     // old guard returned level 0 on the demo and the reactive torch never fired (screen flashed from the
     // cue list directly, but the torch reads THIS level). Give the demo its looped loudness here too so
@@ -545,6 +628,7 @@
     var synced = !!(clock && clock.ready); window.__cls.synced = synced;
     var finalRgb = [0, 0, 0], flum = 0, pos = -1, playing = false, epochNow = runState.epoch;
     var nowf = performance.now(); var dt = lastFrameT ? nowf - lastFrameT : 16; lastFrameT = nowf;
+    micTick(dt);                                        // round 16: advance the smoothed mic level (no-op unless mic mode is on)
     var musicLevel = sampleEnv();                       // governed loudness once — shared by screen + torch
 
     // round 13 (pt 5): a firework FX overlays the screen + torch for a few seconds, then evaporates and
@@ -755,6 +839,7 @@
 
   function leave() {
     window.__cls.started = false;
+    qrPaint();                     // round 16 (#1): the QR belongs to the live screen — drop it with the show
     preset = null; runState.status = 'idle'; // opt-out is terminal: stop all rendering
     if (audio) { try { audio.teardown(); } catch (e) {} audio = null; audioOn = false; }
     try { if (ws) ws.close(); } catch (e) {}

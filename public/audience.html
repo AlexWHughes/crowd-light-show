@@ -72,6 +72,20 @@
 <div id="statuspill" class="hidden"></div>
 <div id="brightToast" class="hidden"></div>
 
+<!-- round 16 (#1): SHARE-THIS-SHOW QR. The room's OWN join code, painted on the live (flashing)
+     screen, so someone standing next to this phone can scan it straight off the glass and land in
+     the SAME show. A static <img> on a solid card: no per-frame work and no luminance change of the
+     #flash layer, so the epilepsy governor is untouched. The ✕ (or a tap anywhere on the card) hides
+     it to a small corner pill, and the pill brings it back — the choice is remembered on this device. -->
+<div id="shareQr" class="hidden">
+  <div id="shareQrCap" data-t="qr_cap">Podziel się pokazem — zeskanuj kod</div>
+  <div id="shareQrBox">
+    <img id="shareQrImg" alt="" width="600" height="600">
+    <button id="shareQrHide" type="button" aria-label="Ukryj kod QR">✕</button>
+  </div>
+</div>
+<button id="shareQrPill" class="hidden" type="button" data-t="qr_show">🔗 QR</button>
+
 <script src="/static/clocksync.js"></script>
 <script src="/static/presets.js"></script>
 <script src="/static/fx.js"></script>
