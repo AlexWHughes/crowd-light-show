@@ -128,9 +128,11 @@ input[type=password], input[type=text] { width: 100%; padding: 12px; border-radi
   background: #fff; border: 2px solid rgba(0,0,0,.55); box-shadow: 0 6px 22px rgba(0,0,0,.45); }
 #shareQrImg { display: block; width: min(44vw, 26vh, 186px); height: auto; aspect-ratio: 1 / 1;
   image-rendering: pixelated; }
-/* The explicit "hide" affordance — a real ✕ on the corner of the card, so nobody has to guess that
-   the card is tappable. 44x44 to meet the WCAG 2.5.8 target size; the glyph inside stays small. */
-#shareQrHide { position: absolute; top: -16px; right: -16px; width: 44px; height: 44px; margin: 0;
+/* The explicit "hide" affordance — a real ✕ beside the card, so nobody has to guess that the card is
+   tappable. 44x44 to meet the WCAG 2.5.8 target size, and placed just OUTSIDE the card rather than on
+   its corner: overlapping the quiet zone (or the top-right finder pattern behind it) is exactly what
+   makes a code fail to scan in a dark room, which is the one job this code has. */
+#shareQrHide { position: absolute; top: -6px; right: -52px; width: 44px; height: 44px; margin: 0;
   padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; display: flex; align-items: center;
   justify-content: center; background: rgba(0,0,0,.82); color: #fff; border: 1px solid rgba(255,255,255,.45);
   box-shadow: 0 2px 8px rgba(0,0,0,.5); }

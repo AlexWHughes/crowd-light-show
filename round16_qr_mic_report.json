@@ -1,9 +1,9 @@
 {
-  "base": "http://localhost:4201",
+  "base": "http://localhost:4401",
   "checks": {
     "qr_serves_png": {
       "ok": true,
-      "detail": "status=200 type=image/png bytes=3701"
+      "detail": "status=200 type=image/png bytes=3667"
     },
     "qr_cacheable": {
       "ok": true,
@@ -11,7 +11,7 @@
     },
     "qr_encodes_main_join_url": {
       "ok": true,
-      "detail": "served == QR(\"http://localhost:4201/join?s=290677\") : true"
+      "detail": "served == QR(\"http://localhost:4401/join?s=420297\") : true"
     },
     "qr_room_scoped": {
       "ok": true,
@@ -43,7 +43,7 @@
     },
     "qr_does_not_stop_the_show": {
       "ok": true,
-      "detail": "everLit=true lastBg=rgb(44,15,84) frames=152"
+      "detail": "everLit=true lastBg=rgb(43,15,84) frames=152"
     },
     "qr_hide_button": {
       "ok": true,
@@ -87,7 +87,7 @@
     },
     "mic_rate_capped": {
       "ok": true,
-      "detail": "4 frames reached the phone in 0.26s = 15.6/s (server cap 30/s)"
+      "detail": "5 frames reached the phone in 0.43s = 11.5/s (server cap 30/s)"
     },
     "mic_clamps_out_of_range": {
       "ok": true,
@@ -147,7 +147,7 @@
     },
     "e2e_mic_capture_running": {
       "ok": true,
-      "detail": "getUserMedia is live: peak rms=0.6747 peak level=0.00 over 2.4s · frames sent=96 over ws"
+      "detail": "getUserMedia is live: peak rms=0.6747 peak level=1.00 over 2.4s · frames sent=95 over ws"
     },
     "e2e_mic_panel_shown": {
       "ok": true,
@@ -155,11 +155,11 @@
     },
     "e2e_phone_follows_the_microphone": {
       "ok": true,
-      "detail": "the phone is on the mic source with 91 frames, running preset \"pulse\" (rgb [58,20,112])"
+      "detail": "the phone is on the mic source with 90 frames, running preset \"pulse\" (rgb [61,21,117])"
     },
     "e2e_level_actually_modulates": {
       "ok": true,
-      "detail": "phone-side level swing over 2.4s = 0.500 (min 0.00 max 0.50)"
+      "detail": "phone-side level swing over 2.4s = 0.501 (min 0.00 max 0.50)"
     },
     "e2e_switch_back_to_internal": {
       "ok": true,
