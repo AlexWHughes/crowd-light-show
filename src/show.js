@@ -18,7 +18,7 @@ export const MAIN_ROOM = 'main';
 // room ADVANCES through plOrder (looping) instead of stopping. 'all' = loop every public track,
 // 'selected' = loop a chosen subset, 'one' = loop the current track. Main show: plOrder stays []
 // (ends -> stop, unchanged).
-function newRun() { return { epoch: 0, status: 'idle', trackId: null, T0: null, pausePos: 0, plMode: 'all', plOrder: [], plIdx: 0, plSelected: [], muteAll: false, manual: defaultManual(), palette: { on: false, colors: [] } }; }
+function newRun() { return { epoch: 0, status: 'idle', trackId: null, T0: null, pausePos: 0, plMode: 'all', plOrder: [], plIdx: 0, plSelected: [], muteAll: false, manual: defaultManual(), palette: { on: false, colors: [] }, mic: defaultMic() }; }
 
 // round 14: the live MANUAL OVERRIDE ("VJ pult") state, per room. on=false => phones behave
 // exactly as before. mode 'full' = pure manual (screen = manual HSV, torch = manual flash);
@@ -26,6 +26,26 @@ function newRun() { return { epoch: 0, status: 'idle', trackId: null, T0: null, 
 // scale, flash boost). All four values are slowly-varying operator params; the on-device safety
 // governors (clampColor + backstop for the screen, torchGate for the LED) stay the last stage.
 function defaultManual() { return { on: false, mode: 'intervene', sat: 1, hue: 0, bri: 1, flash: 0 }; }
+
+// round 16: LIVE MIC SOURCE. The operator can switch the light source from the INTERNAL track
+// (a pre-baked, clock-synced timeline) to the MICROPHONE of the device they run the show from —
+// so the crowd reacts to whatever the room is actually hearing (a DJ, a band, a house PA).
+// ONLY a scalar loudness 0..1 crosses the wire, never audio, and it lands in exactly the same
+// `level` slot the compiled cue brightness feeds — so every screen/torch preset reacts unchanged
+// and the phone-side safety governors (clampColor + backstop <=3 fl/s, torchGate <=2.8/s) stay
+// the last stage. mic.on=false => every path below is inert and the show behaves exactly as before.
+function defaultMic() { return { on: false, lastAt: 0, owner: null }; }
+// Hard per-room cap on the live-loudness broadcast, SCALED BY ROOM SIZE. One frame is one socket
+// write per phone, so a flat 30 Hz would be 45 000 writes/s at the 1500-phone ceiling — enough to
+// starve the event loop that also runs the clock-sync replies the whole show depends on. The phone
+// interpolates between frames (45 ms attack / 160 ms release), so a big room degrades to a lower
+// frame rate without the light visibly stepping.
+function micGapMs(members) {
+  const n = members || 0;
+  if (n <= 300) return 33;    // <=30 Hz — a club
+  if (n <= 800) return 100;   // 10 Hz — a mid-size venue
+  return 200;                 //  5 Hz — a stadium; smoothing on the phone carries it
+}
 function clamp01(x) { x = Number(x); return x < 0 || x !== x ? 0 : x > 1 ? 1 : x; }
 
 // Sticky index allocator: hands each phone a stable 0-based index so spatial presets
@@ -69,6 +89,7 @@ export class ShowHub {
       plOrder: [],        // MAIN never loops a playlist, but seek()/_roomLoops read plOrder
       manual: defaultManual(), // round 14: live VJ manual override on the MAIN show
       palette: { on: false, colors: [] }, // round 14: restrict colours to a chosen set
+      mic: defaultMic(),  // round 16: live microphone source (operator's device listens to the room)
     };
   }
 
@@ -202,6 +223,7 @@ export class ShowHub {
       if (this.state.muteAll) this.send(ws, { t: 'muteAll', muted: true }); // late-join global mute (pt 8)
       if (this.state.manual && this.state.manual.on) this.send(ws, { t: 'manual', ...this.state.manual }); // round 14: late-join VJ override
       if (this.state.palette && this.state.palette.on) this.send(ws, { t: 'palette', ...this.state.palette }); // round 14: late-join palette
+      this.send(ws, { t: 'micMode', on: !!(this.state.mic && this.state.mic.on) }); // round 16: ALWAYS state the source — a reconnecting phone must be able to leave mic mode too
       if (this.fx && serverClock() - this.fx.startedAt < this.fx.durationMs) this.send(ws, { t: 'fx', ...this.fx }); // late-join firework, if still in-window (pt 5)
       this.send(ws, { t: 'index', index: this.alloc.indexOf(ws), total: this.alloc.total() }); // joiner gets its index now
       this.markIndexDirty(MAIN_ROOM);   // others refresh total on the coalesced flush
@@ -225,6 +247,7 @@ export class ShowHub {
       if (r.run && r.run.muteAll) this.send(ws, { t: 'muteAll', muted: true }); // late-join global mute (pt 8)
       if (r.run && r.run.manual && r.run.manual.on) this.send(ws, { t: 'manual', ...r.run.manual }); // round 14: late-join VJ override
       if (r.run && r.run.palette && r.run.palette.on) this.send(ws, { t: 'palette', ...r.run.palette }); // round 14: late-join palette
+      this.send(ws, { t: 'micMode', on: !!(r.run && r.run.mic && r.run.mic.on) }); // round 16: ALWAYS state the source (see the MAIN branch)
       if (r.fx && serverClock() - r.fx.startedAt < r.fx.durationMs) this.send(ws, { t: 'fx', ...r.fx }); // late-join firework, if still in-window (pt 5)
       this.send(ws, { t: 'index', index: r.alloc.indexOf(ws), total: r.alloc.total() });
       this.markIndexDirty(roomId);
@@ -339,10 +362,15 @@ export class ShowHub {
     const mode = run.plMode || 'all';
     let order;
     if (mode === 'one') order = [trackId];
-    else if (mode === 'selected' && Array.isArray(run.plSelected) && run.plSelected.length) {
+    else if (mode === 'selected') {
       const valid = new Set([...curated, ...guestIds]);
-      order = run.plSelected.filter((id) => valid.has(id));
-      if (!order.length) order = guestIds.concat(curated); // empty selection -> fall back to all
+      order = (Array.isArray(run.plSelected) ? run.plSelected : []).filter((id) => valid.has(id));
+      // ROUND 16 FIX: an unresolvable/empty selection used to fall back to "loop everything" — the exact
+      // opposite of what the "Selected loop" button promises, so tracks the operator never ticked played.
+      // Fall back to the ONE track that is actually armed instead: in 'selected' mode nothing the
+      // operator did not pick may ever be heard. (Combined with the guest-id bug fixed in setPlaylist
+      // below, this is what made a /studio room play the whole library in "Selected loop".)
+      if (!order.length) order = [trackId];
     } else order = guestIds.concat(curated);               // all: this room's uploads first, then curated
     const at = order.indexOf(trackId);
     run.plOrder = order;
@@ -357,7 +385,18 @@ export class ShowHub {
     if (h.isMain) return { ok: false, error: 'no playlist on the main show' };
     const run = h.run;
     run.plMode = (mode === 'one' || mode === 'selected') ? mode : 'all';
-    if (Array.isArray(selected)) run.plSelected = selected.map(Number).filter(Number.isFinite);
+    if (Array.isArray(selected)) {
+      // ROUND 16 FIX: a room's OWN uploads carry STRING ids ('g:<room>:<id6>', round 12 pt 6), and the
+      // old `selected.map(Number)` turned every one of them into NaN and dropped it — so ticking your
+      // own uploaded track produced an EMPTY selection, which then fell through to "loop everything".
+      // Keep real numbers, keep THIS room's guest ids (prefix + charset checked, never a regex built
+      // from the room id), drop anything else — the body is still untrusted.
+      const gpre = 'g:' + roomId + ':';
+      const isGuest = (id) => typeof id === 'string' && id.indexOf(gpre) === 0 && /^[a-z0-9]{1,32}$/.test(id.slice(gpre.length));
+      run.plSelected = selected
+        .map((id) => (isGuest(id) ? id : Number(id)))
+        .filter((id) => typeof id === 'string' || (Number.isFinite(id) && id > 0));
+    }
     this._syncPlaylist(roomId, typeof run.trackId === 'number' ? run.trackId : (run.plOrder[0] || null));
     // if the current track fell out of the order (e.g. switched to 'selected' without it), play order[0]
     if (run.plOrder.length && (typeof run.trackId !== 'number' || run.plOrder.indexOf(run.trackId) < 0)) {
@@ -389,7 +428,8 @@ export class ShowHub {
     const len = run.plOrder.length;
     const nowId = len ? run.plOrder[run.plIdx] : (run.trackId == null ? null : run.trackId);
     const nextId = len ? run.plOrder[(run.plIdx + 1) % len] : null;
-    return { mode: run.plMode || 'all', idx: run.plIdx, len, nowId, nextId, order: run.plOrder.slice() };
+    return { mode: run.plMode || 'all', idx: run.plIdx, len, nowId, nextId, order: run.plOrder.slice(),
+      selected: Array.isArray(run.plSelected) ? run.plSelected.slice() : [] };   // round 16: the console shows what is really in the loop
   }
   broadcastPlaylist(roomId) {
     const h = this._rt(roomId, false);
@@ -409,13 +449,36 @@ export class ShowHub {
     return h.isMain ? { ok: true } : { ok: true, members: h.members.size };
   }
 
+  // Cat Conga handoff (Фаза D игрового модуля): АДДИТИВНО — только broadcast, run-state/эпилепси-governor не трогаются.
+  // Клиенты без игрового кода просто игнорируют {t:'prefetch'|'game'}. MAIN-поведение показа байт-идентично.
+  gamePrefetch(roomId, sceneUrl, windowSec) {
+    const h = this._rt(roomId, true);
+    if (!h) return { ok: false, error: 'room unavailable' };
+    // windowSec — окно рандомизации закачки на клиентах (оператор знает длину шоу); дефолт клиента 240 с
+    const msg = { t: 'prefetch', sceneUrl: String(sceneUrl || '').slice(0, 300) };
+    if (Number(windowSec) > 0) msg.windowSec = Math.min(3600, Number(windowSec) | 0);
+    h.broadcast(msg);
+    return { ok: true };
+  }
+  gameLaunch(roomId, url, T0) {
+    const h = this._rt(roomId, true);
+    if (!h) return { ok: false, error: 'room unavailable' };
+    // T0 — в домене serverClock() (см. go()): вне ближнего окна (эпоха-мс и прочие чужие домены) → дефолт +3 с,
+    // иначе телефон, сравнив с clock.serverNow(), ждал бы годами (пойман эмулятором на реальном audience.js)
+    let t0 = Number(T0);
+    const nowS = serverClock();
+    if (!Number.isFinite(t0) || t0 < nowS - 2000 || t0 > nowS + 60000) t0 = nowS + 3000;
+    h.broadcast({ t: 'game', url: String(url || '').slice(0, 300), T0: t0 });
+    return { ok: true };
+  }
+
   addOperator(ws) { this.operators.add(ws); this.send(ws, { t: 'state', state: this.publicState() }); this.broadcastCount(); }
   removeOperator(ws) {
     this.operators.delete(ws);
     // round 14 fix: if the last MAIN operator drops (tab close / crash / network drop) while a VJ manual
     // override is latched, release it server-side — a client beforeunload is unreliable, and otherwise the
     // crowd stays frozen on the absent operator's last colour/flash (and it replays to every late joiner).
-    if (this.operators.size === 0) this._releaseManual(this._rt('main', false));
+    if (this.operators.size === 0) { const h = this._rt('main', false); this._releaseManual(h); this._releaseMic(h); } // round 16: a vanished operator must not leave the crowd on a dead mic feed
   }
 
   broadcastCount() {
@@ -449,6 +512,7 @@ export class ShowHub {
   arm(trackId, opts = {}, roomId) {
     const h = this._rt(roomId, true);
     if (!h) return { ok: false, error: 'room unavailable' };
+    this._releaseMic(h);   // round 16: arming a track picks the INTERNAL source; a room must never run two sources at once
     const tl = this.loadTimeline(trackId);
     if (!tl) return { ok: false, error: 'no timeline for track' };
     this.cancelEnd(roomId);
@@ -604,6 +668,50 @@ export class ShowHub {
     h.run.palette = { on: !!on && safe.length > 0, colors: safe };
     h.broadcast({ t: 'palette', on: h.run.palette.on, colors: h.run.palette.colors });
     return { ok: true, palette: h.run.palette };
+  }
+
+  // ---- round 16: live MIC source (see defaultMic above) ----
+  // Switch a room between the internal track and the operator's microphone. ADDITIVE: turning it
+  // OFF restores byte-identical previous behaviour, and turning it ON changes nothing on its own —
+  // it only opens the door for pushMic() frames. Transport (arm/go/pause/stop) is untouched, so the
+  // operator can stop the internal music and drive the crowd from the room's PA instead.
+  setMic(roomId, on, owner) {
+    const h = this._rt(roomId, true);
+    if (!h) return { ok: false, error: 'room unavailable' };
+    const m = h.run.mic || (h.run.mic = defaultMic());
+    const was = m.on;
+    m.on = !!on;
+    m.owner = m.on ? (owner || null) : null;
+    if (m.on !== was) {
+      m.lastAt = 0;   // only on a REAL change: resetting it on every call would let a caller clear the rate cap at will
+      h.broadcast({ t: 'micMode', on: m.on });
+      if (!m.on) h.broadcast({ t: 'lvl', v: 0 }); // release: the crowd fades to level 0 at once
+    }
+    return { ok: true, mic: { on: m.on } };
+  }
+  // One live loudness frame from the operator's device. DROPPED unless mic mode is on for THAT room
+  // (a stale or rogue stream can never drive a room that is not listening), clamped to 0..1, and
+  // rate-capped per room so a runaway sender cannot turn into a broadcast storm at stadium scale.
+  pushMic(roomId, v) {
+    const h = this._rt(roomId, false);
+    if (!h || !h.run || !h.run.mic || !h.run.mic.on) return { ok: false, error: 'mic off' };
+    const now = serverClock();
+    if (now - (h.run.mic.lastAt || 0) < micGapMs(h.members ? h.members.size : 0)) return { ok: true, dropped: true };
+    h.run.mic.lastAt = now;
+    h.broadcast({ t: 'lvl', v: clamp01(v) });
+    return { ok: true };
+  }
+  // The operator's console vanished (tab close, crash, network drop) while the mic was driving the
+  // crowd: release it server-side, exactly like _releaseManual. The phone ALSO has a 1.5 s watchdog
+  // that decays the level to 0 on its own, so a lost socket can never freeze the crowd at full tilt.
+  _releaseMic(h, owner) {
+    if (!h || !h.run || !h.run.mic || !h.run.mic.on) return;
+    // Ownership guard: on a console reconnect the OLD socket's close event arrives after the NEW
+    // socket has already re-asserted the source. Releasing then would kill a live feed.
+    if (owner !== undefined && h.run.mic.owner && h.run.mic.owner !== owner) return;
+    h.run.mic = defaultMic();
+    h.broadcast({ t: 'micMode', on: false });
+    h.broadcast({ t: 'lvl', v: 0 });
   }
 
   stop(roomId) {

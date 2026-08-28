@@ -11,7 +11,7 @@ const page = await (await b.newContext()).newPage();
 await page.goto(`${BASE}/join?s=${code}`); // NO auto -> consent gate active
 await page.waitForTimeout(1500);
 const pre = await page.evaluate(() => ({ everLit: window.__cls.everLit, flashes: window.__cls.flashes.length, started: window.__cls.started, bg: getComputedStyle(document.getElementById('flash')).backgroundColor }));
-await page.check('#agree'); await page.click('#joinScreen');
+await page.click('#agreeBtn'); await page.click('#joinScreen'); // round 15c: confirm button, then join
 await page.waitForTimeout(1800);
 const post = await page.evaluate(() => ({ wake: !!window.__cls.wakeTried, fs: !!window.__cls.fsTried, started: window.__cls.started, synced: window.__cls.synced }));
 await page.click('#stopbtn'); await page.waitForTimeout(400);

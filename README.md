@@ -35,6 +35,8 @@ Requires Node.js 20+ and `ffmpeg` on the host. Prefer Docker? `docker build -t l
 - **One crowd, one light show** — every phone flashes together, in time with the music, off an NTP-like WebSocket clock. Scales to a stadium; the timeline runs locally on each phone so it survives congested venue networks and reconnects automatically.
 - **No app, no wristbands** — the audience scans a QR and joins in the browser. Screen light on every phone (iOS + Android); the real LED flash also fires on Android.
 - **Music-reactive** — upload a track; every phone plays it in sync and the lights follow the music (auto-gain so quiet and loud both look good).
+- **Or no upload at all — use the room's own music.** Switch the source to your device's **microphone** and the crowd reacts live to whatever is playing: a DJ, a band, the house PA. The audio never leaves your device — only a loudness number, ~20×/s.
+- **Every phone shares the show** — each screen carries that room's join QR, so anyone standing nearby can scan it off the glass and join the same show.
 
 **The control room** ([screenshots](https://lightshow.flyreelstudio.eu/#control))
 - **Live presets** — Pulse · Colour Waves · Rainbow Chase · Ocean, plus a *spatial* wave that reads across the crowd. A separate **flash (torch)** channel with its own patterns.
@@ -112,6 +114,8 @@ Flashing light can trigger seizures. A safety governor is the **last, unchangeab
 ## Privacy
 
 Anonymous and ephemeral: no accounts, no personal data, no tracking cookies (the hosted site uses consent-gated, IP-anonymised analytics only). Audience phones join a live show and leave.
+
+The microphone source runs **only on the operator's own device**, and only while they turn it on: the sound is analysed locally and the sole thing sent is a single loudness value between 0 and 1, about 20 times a second. No audio is recorded, stored or uploaded, and audience phones are never asked for microphone access.
 
 ## Roadmap
 

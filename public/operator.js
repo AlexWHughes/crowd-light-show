@@ -15,7 +15,7 @@
   var FEAT = S.features || {};
   var DEFAULTS = S.defaults || {};
   var LEAD_MS = Number(S.lead) || 900;
-  var ws = null, clock = null, armedId = null, audioReady = false, nudge = 0, curState = 'idle';
+  var ws = null, clock = null, steadyPing = null, armedId = null, audioReady = false, nudge = 0, curState = 'idle';
   var pendingGo = false, goWatcher = null; // GO deferred until the operator clock locks (personal)
   var pubT0 = null, pubTrackId = null, soundOn = false; // public: armed-track audio T0 + opt-in sound
   var audio = null, audioBuf = null;                    // AudioSync + the armed track's raw bytes (decoded lazily)
@@ -210,7 +210,7 @@
       // round 12 (pt 6): the visitor's OWN uploads (d.guestTracks) appear in the playlist FIRST, then
       // the host's curated tracks — so they can loop / select their own music like any other track.
       pubTracks = (d.guestTracks || []).concat(d.tracks || []);
-      if (d.playlist && d.playlist.mode) { plMode = d.playlist.mode; plNow = d.playlist.nowId; plNext = d.playlist.nextId; }
+      if (d.playlist && d.playlist.mode) { plMode = d.playlist.mode; plNow = d.playlist.nowId; plNext = d.playlist.nextId; if (Array.isArray(d.playlist.selected)) plSelected = d.playlist.selected; }
       if (d.defaults && d.defaults.playlist_mode && plNow == null) plMode = plMode || d.defaults.playlist_mode;
       var tb = $('tracks').querySelector('tbody'); tb.innerHTML = '';
       pubTracks.forEach(function (t) {
@@ -243,16 +243,26 @@
     var nn = $('plNowNext');
     if (nn) {
       var label = plMode === 'one' ? 'Looping' : (plMode === 'selected' ? 'Selected loop' : 'Loop all');
+      // round 16: in 'selected' mode say how many tracks are really in the loop — the old label gave no
+      // clue when the selection had silently resolved to something other than what was ticked.
+      if (plMode === 'selected') label += ' (' + plSelected.length + ' ticked)';
       nn.textContent = label + ' · Now: ' + plTitle(plNow == null ? armedId : plNow) + (plMode === 'one' ? '' : ' · Next: ' + plTitle(plNext));
     }
   }
   function applyPlMode(mode) {
     plMode = mode;
     // collect ticked ids for 'selected'
-    if (mode === 'selected') { plSelected = []; var cbs = document.querySelectorAll('[data-plsel]'); for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) { var sv = cbs[i].getAttribute('data-plsel'); plSelected.push(/^g:/.test(sv) ? sv : Number(sv)); } } // guest ids stay strings (round 12 pt 6)
+    if (mode === 'selected') {
+      plSelected = []; var cbs = document.querySelectorAll('[data-plsel]');
+      for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) { var sv = cbs[i].getAttribute('data-plsel'); plSelected.push(/^g:/.test(sv) ? sv : Number(sv)); } // guest ids stay strings (round 12 pt 6)
+      // round 16 fix: the tick boxes only exist once the mode already IS 'selected', so the very first
+      // click on "Selected loop" would post an EMPTY list. Seed it with the track that is playing —
+      // "Selected loop" must never start out meaning "play everything".
+      if (!plSelected.length && !cbs.length) { var cur = (plNow != null ? plNow : armedId); if (cur != null) plSelected = [cur]; }
+    }
     api('/api/operator/playlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode, selected: plSelected }) })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (p) { if (p && p.ok) { plNow = p.nowId; plNext = p.nextId; if (typeof p.idx === 'number' && p.nowId != null) armedId = p.nowId; } loadPublic(); });
+      .then(function (p) { if (p && p.ok) { plNow = p.nowId; plNext = p.nextId; if (Array.isArray(p.selected)) plSelected = p.selected; if (typeof p.idx === 'number' && p.nowId != null) armedId = p.nowId; } loadPublic(); });
     renderPlaylistCtl();
   }
   if ($('plModes')) $('plModes').addEventListener('click', function (e) { var m = e.target.getAttribute('data-plmode'); if (m) applyPlMode(m); });
@@ -481,8 +491,16 @@
       if ($('conn')) $('conn').textContent = 'online';
       if (PUBLIC) ws.send(JSON.stringify({ t: 'hello', role: 'audience', room: ROOM, platform: 'console' }));
       else ws.send(JSON.stringify({ t: 'hello', role: 'operator', token: TOKEN }));
+      // round 16 (#2): the public console's socket joins as plain audience; elevate it (token-verified,
+      // room-bound) so the live mic loudness can ride the socket instead of one HTTP POST per frame.
+      // Re-sent on every reopen because a reconnect gives us a brand-new, unelevated socket.
+      if (PUBLIC) { micWsAuthed = false; ws.send(JSON.stringify({ t: 'micauth', token: TOKEN })); }
+      if (micOn) setTimeout(function () { if (micOn) tx('mic', { on: true }); }, 300); // re-assert the source after a reconnect (the server released it on close); re-checked in case the operator switched back meanwhile
       var n = 0; var p = setInterval(function () { if (ws.readyState === 1) { clock.ping(); if (++n >= 25) clearInterval(p); } }, 80);
-      setInterval(function () { if (ws.readyState === 1) clock.ping(); }, 25000);
+      // SINGLETON: this used to allocate a fresh 25 s interval on every reconnect, so a long show
+      // behind a flaky venue network accumulated one ping timer per drop.
+      if (steadyPing) clearInterval(steadyPing);
+      steadyPing = setInterval(function () { if (ws.readyState === 1) clock.ping(); }, 25000);
     };
     ws.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (e) { return; } onWs(m); };
     ws.onclose = function () { if ($('conn')) $('conn').textContent = 'offline — retrying'; setTimeout(connect, 1500); };
@@ -491,6 +509,7 @@
 
   function onWs(m) {
     if (m.t === 'sync') { clock.onReply(m.c0, m.s1); if (clock.ready && curState === 'idle') renderState({ status: curState }); return; }
+    if (m.t === 'micauth') { micWsAuthed = !!m.ok; window.__opMic.authed = micWsAuthed; return; } // round 16 (#2)
     if (!PUBLIC) {
       if (m.t === 'count') {
         gaPeakUpdate(m.audience);
@@ -507,7 +526,7 @@
     if (m.t === 'index') { var n = Math.max(0, (m.total | 0) - 1); gaPeakUpdate(n); if ($('count2')) $('count2').textContent = n; if ($('countBig')) $('countBig').textContent = n; return; } // -1: the console itself is a member
     if (m.t === 'timeline') { var chg = (m.trackId !== pubTrackId); pubTrackId = m.trackId; consoleTimeline = m.data || null; seekSetDur(m.data && m.data.durationMs); if (chg && soundOn && typeof m.trackId === 'number') reloadConsoleSound(m.trackId); return; } // round 13 (pt 4/7): cues for the Live preview + seek range
     if (m.t === 'playlist') { // round 10: the room advanced (or mode changed) — follow now/next
-      plMode = m.mode || plMode; plNow = m.nowId; plNext = m.nextId;
+      plMode = m.mode || plMode; plNow = m.nowId; plNext = m.nextId; if (Array.isArray(m.selected)) plSelected = m.selected;
       if (m.nowId != null && m.nowId !== armedId) { armedId = m.nowId; loadPublic(); } else renderPlaylistCtl();
       return;
     }
@@ -626,6 +645,9 @@
     return null;
   }
   function simLoudness() {
+    // round 16: with the MICROPHONE as the source there is no track position to sample — the preview
+    // must follow the live level, or the operator is driving the crowd blind.
+    if (micOn) return micLevel;
     if (curState !== 'running' || armedId == null) return 0;
     var p = consolePos(); if (p == null) return 0;
     var c = sampleCueAt(p); return c ? c.b : 0;
@@ -644,12 +666,12 @@
     var mp = $('mainPreview'); if (!mp) return; var mc = mp.getContext ? mp.getContext('2d') : null; if (!mc) return;
     if (!mp.width || mp.width < 8) { mp.width = mp.clientWidth || 320; mp.height = 48; }
     var bg = '#000', lvl = 0;
-    if (curState === 'running') {
+    if (curState === 'running' || micOn) {   // round 16: in mic mode the crowd is lit by a preset with no transport running
       if (activeType && window.__opPreview && window.__opPreview.lastBg) { bg = window.__opPreview.lastBg; lvl = window.__opPreview.maxLum || 0; } // a preset overlay drives the crowd screen
       else { var p = consolePos(), c = p != null ? sampleCueAt(p) : null; if (c) { bg = 'rgb(' + Math.round(c.rgb[0] * c.b) + ',' + Math.round(c.rgb[1] * c.b) + ',' + Math.round(c.rgb[2] * c.b) + ')'; lvl = c.b; } } // round 13 (pt 4): no preset -> show the music-reactive TIMELINE colour the crowd sees
     }
     mc.fillStyle = bg; mc.fillRect(0, 0, mp.width, mp.height);
-    window.__opMainPv = { bg: bg, level: lvl, running: curState === 'running', hasTimeline: !!consoleTimeline }; // test seam (pt 4)
+    window.__opMainPv = { bg: bg, level: lvl, running: curState === 'running' || micOn, hasTimeline: !!consoleTimeline, mic: micOn }; // test seam (pt 4 / round 16)
   }
   function pvFrame(now) {
     requestAnimationFrame(pvFrame);
@@ -883,6 +905,198 @@
       }
     } catch (e) {}
   });
+
+  // ===== round 16 (#2): MUSIC SOURCE — the internal track, or THIS device's MICROPHONE =====
+  // The operator can switch the light source from the pre-baked, clock-synced timeline to whatever
+  // the room is actually playing. This console listens with getUserMedia, reduces each analyser
+  // frame to ONE loudness number (RMS -> dB curve -> a rolling floor/ceiling AGC so a quiet bar and
+  // a loud club both use the full range), and streams it at <=20 Hz to the room. The AUDIO NEVER
+  // LEAVES THIS DEVICE — no recording, no upload, nothing stored. On the phones that number lands in
+  // exactly the same "level" slot the compiled cue brightness feeds, so every screen preset and the
+  // torch channel react to the real music while clampColor + backstop (<=3 fl/s) and torchGate
+  // (<=2.8/s) still run last: the epilepsy envelope is identical to the internal-music path.
+  var micStream = null, micCtx = null, micAnalyser = null, micData = null, micRaf = null;
+  var micOn = false, micStarting = false, micWsAuthed = false, micAGC = null, micGainV = 1;
+  var micWake = null, micHttpInFlight = false;
+  var micLastAt = 0, micLastSend = 0, micLevel = 0, micRms = 0, micSent = 0;
+  var MIC_HZ = 20;                       // frames/s pushed to the room (the server hard-caps at 30)
+  window.__opMic = { on: false, authed: false, level: 0, rms: 0, rmsPeak: 0, sent: 0, err: null, transport: null }; // test seam (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
+
+  // Rolling floor/ceiling normaliser: the venue's own dynamic window, so the lights swing fully
+  // whether the mic hears a quiet acoustic set or a wall of PA. Floor rises slowly / falls fast,
+  // ceiling catches a hit fast / decays slowly — the same shape as the round-13 torch AGC.
+  function makeLevelAGC() {
+    var F = 0, C = 0, init = false, MIN_SPAN = 0.06;
+    function k(tauS, dtMs) { return 1 - Math.exp(-(dtMs / 1000) / Math.max(0.001, tauS)); }
+    return function (raw, dtMs) {
+      raw = Math.max(0, Math.min(1, raw || 0)); dtMs = Math.max(1, Math.min(200, dtMs || 50));
+      if (!init) { F = raw; C = raw + MIN_SPAN; init = true; }
+      F += (raw > F ? k(4.0, dtMs) : k(0.30, dtMs)) * (raw - F);
+      C += (raw > C ? k(0.08, dtMs) : k(3.0, dtMs)) * (raw - C);
+      var span = Math.max(MIN_SPAN, C - F);
+      return Math.max(0, Math.min(1, (raw - F) / span));
+    };
+  }
+
+  // One loudness frame to the room. The WebSocket is the real path (a 20 Hz HTTP POST stream would
+  // be absurd on a phone); the HTTP route is the fallback while the socket is down or unelevated.
+  function micSend(v) {
+    if (ws && ws.readyState === 1 && (!PUBLIC || micWsAuthed)) {
+      try { ws.send(JSON.stringify({ t: 'op', cmd: 'lvl', v: v })); micSent++; window.__opMic.sent = micSent; window.__opMic.transport = 'ws'; } catch (e) { /* drop this frame */ }
+      return;
+    }
+    window.__opMic.transport = 'http';
+    if (micHttpInFlight) return;   // single-flight: without this the fallback piles up 20 requests/s while the socket is down
+    micHttpInFlight = true;
+    api('/api/operator/mic-level', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: v }) })
+      .then(function () { micSent++; window.__opMic.sent = micSent; })
+      .catch(function () {})
+      .then(function () { micHttpInFlight = false; });
+  }
+
+  function micMeterDraw() {
+    var c = $('micMeter'); if (!c || !c.getContext) return;
+    if (!c.width || c.width < 8) { c.width = c.clientWidth || 320; c.height = 34; }
+    var g = c.getContext('2d'), w = c.width, h = c.height;
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    var grad = g.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, '#2bc0ee'); grad.addColorStop(0.7, '#5aa0ff'); grad.addColorStop(1, '#ffd98a');
+    g.fillStyle = grad; g.fillRect(0, 0, Math.round(w * micLevel), h);
+    // a thin raw-RMS tick, so the operator can tell "no sound is reaching the mic" from "the AGC is flat"
+    g.fillStyle = 'rgba(255,255,255,.8)'; g.fillRect(Math.min(w - 2, Math.round(w * Math.min(1, micRms * 4))), 0, 2, h);
+  }
+
+  function micFrame(now) {
+    micRaf = requestAnimationFrame(micFrame);
+    if (!micAnalyser || !micData) return;
+    micAnalyser.getByteTimeDomainData(micData);
+    var sum = 0;
+    for (var i = 0; i < micData.length; i++) { var d = (micData[i] - 128) / 128; sum += d * d; }
+    micRms = Math.sqrt(sum / micData.length);
+    // RMS -> a perceptual 0..1 over a 60 dB window, so a normal room does not sit pinned near zero
+    var loud = Math.max(0, Math.min(1, (20 * Math.log(Math.max(1e-4, micRms)) / Math.LN10 + 60) / 60));
+    var dt = micLastAt ? now - micLastAt : 50; micLastAt = now;
+    micLevel = Math.max(0, Math.min(1, micAGC(loud, dt) * micGainV));
+    window.__opMic.level = micLevel; window.__opMic.rms = micRms;
+    if (micRms > window.__opMic.rmsPeak) window.__opMic.rmsPeak = micRms;
+    micMeterDraw();
+    if (now - micLastSend >= 1000 / MIC_HZ) { micLastSend = now; micSend(micLevel); }
+  }
+
+  // The crowd only lights up while SOMETHING drives the screen. Switching source stops the internal
+  // show, which clears the phones' presets, and in mic mode there is no timeline to fall back on —
+  // so re-assert a reactive screen look (and the reactive flash), otherwise the switch just goes dark.
+  function micEnsureReactive() {
+    try {
+      if (presetSchema) {
+        var want = (activeType && activeType !== 'off' && presetSchema[activeType]) ? activeType
+          : (presetSchema.pulse ? 'pulse' : Object.keys(presetSchema)[0]);
+        if (want) pickPreset(want);
+      }
+      // Only RE-ASSERT a torch pattern the operator already had running: STOP cleared it on the
+      // phones, but if they had the flash channel off, switching the music source must not switch it on.
+      if (torchSchema && FEAT.torch !== false && activeTorch && activeTorch !== 'off' && torchSchema[activeTorch]) pickTorch(activeTorch);
+    } catch (e) { /* a missing schema must never block the source switch */ }
+  }
+
+  function srcMsg(text) { var e = $('srcMsg'); if (e) e.textContent = text || ''; }
+  function renderSource() {
+    var bi = $('srcInternal'), bm = $('srcMic'), panel = $('micPanel');
+    if (bi) { bi.className = micOn ? 'ghost' : 'primary'; bi.style.width = 'auto'; }
+    if (bm) { bm.className = micOn ? 'primary' : 'ghost'; bm.style.width = 'auto'; }
+    if (panel) { if (micOn) panel.classList.remove('hidden'); else panel.classList.add('hidden'); }
+    window.__opMic.on = micOn;
+  }
+
+  function micStart() {
+    if (micOn || micStarting) return;   // re-entrancy: micOn is only set once getUserMedia resolves, so a double tap used to open a second stream nothing could close
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      window.__opMic.err = 'unsupported';
+      srcMsg(tr('console.mic_unsupported', 'This browser cannot open a microphone. Use Chrome or Safari over https.')); return;
+    }
+    micStarting = true;
+    srcMsg(tr('console.mic_asking', 'Asking for microphone access…'));
+    // The three processing flags MUST be off: echo cancellation, noise suppression and auto gain are
+    // tuned for speech and would chew the music into a flat, unusable envelope.
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } })
+      .then(function (st) {
+        micStream = st;
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) throw new Error('no WebAudio');
+        micCtx = new AC();
+        if (micCtx.resume) { var rp = micCtx.resume(); if (rp && rp['catch']) rp['catch'](function () {}); }
+        micAnalyser = micCtx.createAnalyser();
+        micAnalyser.fftSize = 1024; micAnalyser.smoothingTimeConstant = 0;
+        micCtx.createMediaStreamSource(st).connect(micAnalyser);   // analyser ONLY — never to destination (that would howl)
+        micData = new Uint8Array(micAnalyser.fftSize);
+        micAGC = makeLevelAGC(); micLastAt = 0; micLastSend = 0; micLevel = 0; micRms = 0;
+        window.__opMic.rmsPeak = 0;
+        micOn = true; micStarting = false; window.__opMic.err = null;
+        renderSource();
+        // The capture lives in requestAnimationFrame, which STOPS when the tab is hidden or the phone
+        // locks — the crowd would fade out while the console still said LIVE. Hold a screen wake lock
+        // while the microphone is the source, and say so out loud if we lose visibility anyway.
+        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (w) { micWake = w; })['catch'](function () {}); } catch (e) {}
+        ga('mic_source', { on: 1 });
+        // Hand the lights over: stop the internal track (both the crowd's copy and this monitor) so
+        // the two sources can never fight, then switch the source and re-light with a reactive preset.
+        tx('stop', {});
+        if (audio) { try { audio.stop(); } catch (e) {} }
+        setTimeout(function () { tx('mic', { on: true }); micEnsureReactive(); }, 250);
+        srcMsg(tr('console.mic_live', 'LIVE from the microphone — the crowd follows what this device hears.'));
+        micRaf = requestAnimationFrame(micFrame);
+      })
+      .catch(function (e) {
+        micStarting = false;
+        window.__opMic.err = String((e && e.name) || e);
+        srcMsg(tr('console.mic_denied', 'No microphone access. Allow it in the browser (the page must be https) and try again.'));
+        micStop(true);
+      });
+  }
+
+  function micStop(quiet) {
+    var was = micOn;
+    micOn = false; micStarting = false;
+    if (micWake) { try { micWake.release(); } catch (e) {} micWake = null; }
+    if (micRaf) { cancelAnimationFrame(micRaf); micRaf = null; }
+    if (micStream) { try { micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} micStream = null; }
+    if (micCtx) { try { micCtx.close(); } catch (e) {} micCtx = null; }
+    micAnalyser = null; micData = null; micAGC = null; micLevel = 0; micRms = 0;
+    micMeterDraw(); renderSource();
+    if (was) { tx('mic', { on: false }); ga('mic_source', { on: 0 }); }
+    if (!quiet) srcMsg(tr('console.mic_off', 'Back to the internal music. Press Start (or GO) to play a track again.'));
+  }
+
+  if ($('srcMic')) $('srcMic').addEventListener('click', function () { micStart(); });
+  if ($('srcInternal')) $('srcInternal').addEventListener('click', function () { micStop(false); });
+  if ($('micGain')) $('micGain').addEventListener('input', function () {
+    micGainV = Number($('micGain').value) || 1;
+    var v = $('micGainVal'); if (v) v.textContent = micGainV.toFixed(2) + '×';
+  });
+  // A backgrounded or closed console must not leave the crowd on a feed nobody is producing. The
+  // server releases the source on socket close and the phone decays to 0 after 1.5 s — this is the
+  // polite path that fires first.
+  // A hidden tab / locked screen freezes requestAnimationFrame, so no frames leave and the crowd
+  // decays to darkness within 1.5 s. That is the SAFE failure, but the console must not keep claiming
+  // it is live — say what actually happened, and recover the moment the operator comes back.
+  document.addEventListener('visibilitychange', function () {
+    if (!micOn) return;
+    if (document.hidden) { srcMsg(tr('console.mic_hidden', 'Microphone paused — this page must stay open and unlocked while it drives the lights.')); }
+    else {
+      micLastAt = 0; micLastSend = 0; micAGC = makeLevelAGC();     // the AGC window is stale after a gap
+      if (!micRaf) micRaf = requestAnimationFrame(micFrame);
+      try { if (navigator.wakeLock && !micWake) navigator.wakeLock.request('screen').then(function (w) { micWake = w; })['catch'](function () {}); } catch (e) {}
+      srcMsg(tr('console.mic_live', 'LIVE from the microphone — the crowd follows what this device hears.'));
+    }
+  });
+  // On unload prefer the SOCKET: browsers routinely cancel an in-flight fetch() during pagehide, and
+  // ws.send() is already buffered by the time the page goes away. The server's own socket-close
+  // release and the phone's 1.5 s watchdog remain the guarantees behind this best-effort nicety.
+  window.addEventListener('pagehide', function () {
+    if (!micOn) return;
+    try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'op', cmd: 'mic', on: false })); else tx('mic', { on: false }); } catch (e) {}
+  });
+  renderSource();
 
   // ===== round 14: VJ pult — live manual control (saturation / colour / brightness / flash), four
   // touch-first widget variants in tabs, fullscreen, a palette restriction, and optional WebMIDI. It

@@ -345,6 +345,12 @@ app.post('/api/operator/marquee', (req, reply) => {
   if (!requireOperator(req, reply)) return;
   return hub.setMarquee('main', String((req.body && req.body.text) || '').slice(0, 200));
 });
+// Cat Conga handoff (Фаза D): оператор рассылает prefetch мира в начале шоу и переход в игру по кнопке.
+// Аддитивно — только broadcast нового сообщения; run-state/эпилепси-governor нетронуты.
+app.post('/api/operator/game-prefetch', (req, reply) => { if (!requireOperator(req, reply)) return; return hub.gamePrefetch('main', String((req.body && req.body.sceneUrl) || ''), req.body && req.body.windowSec); });
+app.post('/api/operator/game-launch', (req, reply) => { if (!requireOperator(req, reply)) return; const b = req.body || {}; const t0 = Number(b.inSec) > 0 ? serverClock() + Math.min(60, Number(b.inSec)) * 1000 : b.T0; return hub.gameLaunch('main', String(b.url || ''), t0); });
+app.post('/api/console/game-prefetch', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; return hub.gamePrefetch(room, String((req.body && req.body.sceneUrl) || ''), req.body && req.body.windowSec); });
+app.post('/api/console/game-launch', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; const b = req.body || {}; const t0 = Number(b.inSec) > 0 ? serverClock() + Math.min(60, Number(b.inSec)) * 1000 : b.T0; return hub.gameLaunch(room, String(b.url || ''), t0); });
 // Round 13 (pt 7): seek the music/show to any position. (pt 8): mute the music on ALL phones.
 app.post('/api/console/seek', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; return hub.seek(room, Number(req.body && req.body.offsetMs)); });
 app.post('/api/operator/seek', (req, reply) => { if (!requireOperator(req, reply)) return; return hub.seek('main', Number(req.body && req.body.offsetMs)); });
@@ -359,6 +365,15 @@ app.post('/api/console/manual', MANUAL_RL, (req, reply) => { const room = consol
 app.post('/api/operator/manual', MANUAL_RL, (req, reply) => { if (!requireOperator(req, reply)) return; return hub.setManual('main', req.body || {}); });
 app.post('/api/console/palette', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; return hub.setPalette(room, !!(req.body && req.body.on), req.body && req.body.colors); });
 app.post('/api/operator/palette', (req, reply) => { if (!requireOperator(req, reply)) return; return hub.setPalette('main', !!(req.body && req.body.on), req.body && req.body.colors); });
+// Round 16: switch the light SOURCE between the internal track and the operator device's MICROPHONE,
+// and stream the resulting loudness. The audio itself never leaves the operator's device — only a
+// scalar 0..1 — and the same MANUAL_RL bucket applies because it is the same shape of traffic (a
+// ~20 Hz operator-driven stream). The preferred transport is the WebSocket 'op' path below; these
+// routes are the fallback for a console whose socket is unavailable.
+app.post('/api/console/mic', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; return hub.setMic(room, !!(req.body && req.body.on)); });
+app.post('/api/operator/mic', (req, reply) => { if (!requireOperator(req, reply)) return; return hub.setMic('main', !!(req.body && req.body.on)); });
+app.post('/api/console/mic-level', MANUAL_RL, (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; return hub.pushMic(room, req.body && req.body.v); });
+app.post('/api/operator/mic-level', MANUAL_RL, (req, reply) => { if (!requireOperator(req, reply)) return; return hub.pushMic('main', req.body && req.body.v); });
 // Round 13 (pt 5): fire a one-shot firework FX (validated name, no params -> no untrusted numeric input).
 app.post('/api/console/fx', (req, reply) => { const room = consoleRoom(req, reply); if (!room) return; const r = hub.triggerFx(room, String((req.body && req.body.name) || '')); if (!r.ok) return reply.code(400).send(r); return r; });
 app.post('/api/operator/fx', (req, reply) => { if (!requireOperator(req, reply)) return; const r = hub.triggerFx('main', String((req.body && req.body.name) || '')); if (!r.ok) return reply.code(400).send(r); return r; });
@@ -549,6 +564,37 @@ function serveGuestAudio(room, reply) {
 app.get('/api/console/guest-audio', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, (req, reply) => {
   const room = consoleRoom(req, reply); if (!room) return;
   return serveGuestAudio(room, reply);
+});
+
+// ---- round 16 (#1): the SHARE-THIS-SHOW QR the audience phone paints on its own flashing screen,
+// so someone standing next to a phone can scan it straight off the glass and land in the SAME room.
+// Public + cacheable, and the encoded URL is built SERVER-side from validated inputs only (a room id
+// matched against ROOM_RE, or the demo flag, else the real show's join code) — nothing from the
+// query string is ever echoed into the QR, so this cannot be turned into an open redirect generator.
+const _qrCache = new Map();   // encoded URL -> Promise<PNG buffer> (see the stampede note in the handler)
+app.get('/api/audience/qr', { config: { rateLimit: { max: 6000, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const q = req.query || {};
+  const base = config.publicBaseUrl || '';
+  const room = String(q.room || '');
+  let url;
+  if (room && ROOM_RE.test(room)) url = `${base}/join?room=${room}`;
+  else if (String(q.demo || '') === '1') url = `${base}/join?demo=1`;
+  else url = joinUrl(getOrCreateDefaultShow());
+  // Memoised, and the cache holds the PROMISE, not the buffer. QRCode.toBuffer is pure synchronous
+  // JS on the single event loop (~60 ms per 600px PNG): at a stadium every one of up to 1500 phones
+  // asks for this within the same join herd, and caching only the finished buffer would still let
+  // that whole herd miss at once and block the loop for over a second. Caching the in-flight promise
+  // collapses the stampede to ONE computation per distinct URL — and there are only ever a handful
+  // (the main show + the live rooms). A rejection is evicted so a transient failure is not cached.
+  let png = _qrCache.get(url);
+  if (!png) {
+    png = QRCode.toBuffer(url, { width: 600, margin: 2 }).catch((e) => { _qrCache.delete(url); throw e; });
+    if (_qrCache.size > 200) _qrCache.clear();
+    _qrCache.set(url, png);
+  }
+  png = await png;
+  reply.header('Cache-Control', 'public, max-age=3600');
+  return reply.type('image/png').send(png);
 });
 
 // ---- per-phone synchronized audio: serve ONLY the currently-armed track, no auth,
@@ -885,6 +931,27 @@ wss.on('connection', (ws) => {
     }
     if (!ws.role) return;
     if (m.t === 'sync') { hub.send(ws, { t: 'sync', c0: m.c0, s1: serverClock() }); return; }
+    // Round 16: the PUBLIC console (/studio) already holds a socket, but it joins as plain `audience`
+    // (see the hello branch above) — untrusted, like any phone in the room. To drive the live mic
+    // loudness (~20 Hz, one HTTP request per frame would be absurd) it ELEVATES that same socket
+    // here: the room comes from the VERIFIED console token, must equal the room this socket actually
+    // joined, and the elevation grants exactly ONE capability — {mic, lvl}. Every other console
+    // action keeps going through the re-validating HTTP path, so no new authority is created.
+    if (m.t === 'micauth') {
+      if (!config.studioEnabled || ws.role !== 'audience') return;
+      if (ws.canMic) { hub.send(ws, { t: 'micauth', ok: true }); return; }        // already elevated — do not re-verify on demand
+      if ((ws.micAuthTries = (ws.micAuthTries || 0) + 1) > 5) { try { ws.close(); } catch { /* ignore */ } return; } // no unbounded verifyToken from an unauthenticated socket
+      const s = verifyToken(m.token);
+      if (!s || s.role !== 'console' || !s.room || !ROOM_RE.test(s.room) || s.room !== ws.room) { hub.send(ws, { t: 'micauth', ok: false }); return; }
+      ws.canMic = s.room;
+      hub.send(ws, { t: 'micauth', ok: true });
+      return;
+    }
+    if (m.t === 'op' && ws.role === 'audience' && ws.canMic) {
+      if (m.cmd === 'mic') hub.setMic(ws.canMic, !!m.on, ws);   // ws = owner, so another socket's close cannot release it
+      else if (m.cmd === 'lvl') hub.pushMic(ws.canMic, m.v);
+      return;
+    }
     if (ws.role === 'operator' && m.t === 'op') {
       const c = m.cmd;
       if (c === 'arm') hub.arm(Number(m.trackId), { keepPreset: !!m.keepPreset });
@@ -897,9 +964,12 @@ wss.on('connection', (ws) => {
       else if (c === 'mute-all') hub.muteAll('main', !!m.muted);   // round 13 (pt 8)
       else if (c === 'manual') hub.setManual('main', m);           // round 14: live VJ override (low-latency drag path)
       else if (c === 'palette') hub.setPalette('main', !!m.on, m.colors); // round 14: palette restriction
+      else if (c === 'mic') hub.setMic('main', !!m.on, ws);  // round 16: switch the light source to the operator's microphone (ws owns it)
+      else if (c === 'lvl') hub.pushMic('main', m.v);        // round 16: one live loudness frame (scalar only — no audio)
     }
   });
   ws.on('close', () => {
+    if (ws.canMic) hub._releaseMic(hub._rt(ws.canMic, false), ws); // round 16: the console's socket died -> release, but ONLY the feed this socket owns
     if (ws.role === 'operator') hub.removeOperator(ws);
     else if (ws.role === 'audience') hub.removeAudience(ws);
   });

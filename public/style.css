@@ -105,6 +105,46 @@ input[type=password], input[type=text] { width: 100%; padding: 12px; border-radi
 #marqueeInner { display: inline-block; padding-left: 100%; animation: cls-marq 12s linear infinite; }
 @keyframes cls-marq { from { transform: translateX(0); } to { transform: translateX(-100%); } }
 
+/* round 16 (#1): the SHARE-THIS-SHOW QR on the audience's live (flashing) screen.
+   SIZE — a QR is read reliably at roughly 10x its own width, and a friend's camera is 30-50 cm away,
+   so it has to be a real object (~3 cm), not a badge: min(44vw, 26vh, 186px) lands at ~29-30 mm on a
+   phone, which a modern camera reads comfortably at 30-40 cm while leaving most of the screen to the
+   light show. The 26vh term keeps a short/landscape screen from being swallowed by it, and the 186px
+   cap stops a tablet painting a billboard. At 600px source / ~180px box a DPR-2/3 phone downsamples
+   by <=1.7x, so the modules stay crisp (image-rendering: pixelated, like the console .qrbox).
+   PLACE — bottom-centre, ABOVE the waveform strip (which owns 44-88px), clear of the top-right Stop
+   button and the bottom marquee. The whole upper screen therefore stays pure colour: the light show
+   itself (and photos of it) is unchanged, and the code sits on the edge nearest a person beside you.
+   CONTRAST — solid white card with a dark ring: it must still scan over a WHITE flash frame, so the
+   card can never be translucent. It is a static image: no luminance change, no effect on the flash-
+   rate governor. */
+#shareQr { position: fixed; left: 50%; transform: translateX(-50%); z-index: 5;
+  bottom: calc(116px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 92vw; }
+#shareQrCap { background: rgba(0,0,0,.62); color: #fff; font-size: .76rem; font-weight: 600;
+  line-height: 1.25; text-align: center; padding: 4px 10px; border-radius: 999px; max-width: 86vw;
+  text-shadow: 0 1px 2px #000; pointer-events: none; }
+#shareQrBox { position: relative; padding: 8px; line-height: 0; border-radius: 14px; cursor: pointer;
+  background: #fff; border: 2px solid rgba(0,0,0,.55); box-shadow: 0 6px 22px rgba(0,0,0,.45); }
+#shareQrImg { display: block; width: min(44vw, 26vh, 186px); height: auto; aspect-ratio: 1 / 1;
+  image-rendering: pixelated; }
+/* The explicit "hide" affordance — a real ✕ on the corner of the card, so nobody has to guess that
+   the card is tappable. 44x44 to meet the WCAG 2.5.8 target size; the glyph inside stays small. */
+#shareQrHide { position: absolute; top: -16px; right: -16px; width: 44px; height: 44px; margin: 0;
+  padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; display: flex; align-items: center;
+  justify-content: center; background: rgba(0,0,0,.82); color: #fff; border: 1px solid rgba(255,255,255,.45);
+  box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+#shareQrPill { position: fixed; right: 12px; z-index: 5; width: auto; margin: 0;
+  bottom: calc(116px + env(safe-area-inset-bottom, 0px)); padding: 8px 12px; font-size: .85rem;
+  background: rgba(0,0,0,.6); color: #fff; border-color: rgba(255,255,255,.4); }
+/* Short screens (a phone in landscape): drop the caption and lean on the WIDTH, which is plentiful
+   there — sizing off 30vh gave ~19 mm, well under the ~3 cm this file says a camera needs, so the
+   code stopped being scannable exactly where there was room for it. */
+@media (max-height: 560px) {
+  #shareQrImg { width: min(26vw, 46vh, 168px); }
+  #shareQrCap { display: none; }
+}
+
 /* round 14: VJ pult faux-fullscreen (when the Fullscreen API is unavailable, e.g. iOS Safari) */
 #vjCard.vj-faux-full { position: fixed; inset: 0; z-index: 9999; margin: 0; overflow: auto; border-radius: 0; }
 #vjCard:fullscreen { overflow: auto; padding: 18px; }

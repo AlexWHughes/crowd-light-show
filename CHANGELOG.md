@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-28
+
+Round 16 — share the show off the screen you are already holding, and drive the lights from the music the room is actually playing.
+
+### Added
+
+- **Share QR on the live screen.** Every phone in a show now paints that show's own join QR on its flashing screen, captioned "Share this show — let a friend scan this code", so a bystander can scan it straight off the glass and land in the *same* room (a /studio room, the /try demo, or an invited show — the QR is built server-side from the room the phone is actually in). It sits bottom-centre above the waveform at min(44vw, 26vh, 186px) — about 3 cm on a phone, which a camera 30–40 cm away reads comfortably — on a solid white card with a dark ring so it stays scannable even over a white flash frame, and it leaves roughly 70% of the screen to the light itself. **A ✕ on the corner hides it** (so does a tap anywhere on the card); it shrinks to a small "🔗 QR" pill in the corner, and the pill brings it back. The choice is remembered on the device, so anyone who does not want it never sees it again. It is a static image outside the flash layer, so it adds no per-frame work and cannot affect the flash-rate governor. New public endpoint `GET /api/audience/qr`; PL/EN.
+- **Live microphone as the light source.** The operator console (both `/operator` and the public `/studio`) gains a **Music source** switch: *Internal music* or *Microphone (this device)*. In microphone mode the console listens with `getUserMedia`, reduces each frame to one loudness value (RMS → dB curve → a rolling floor/ceiling AGC, so a quiet bar and a loud club both use the full range, plus a sensitivity slider and a live meter) and streams that value to the room at 20 Hz. Every screen preset and the autonomous torch channel react to it exactly as they react to an uploaded track, so the crowd follows a DJ, a band or the house PA with no upload and no licence. Switching source stops the internal track and re-asserts a reactive look so the change never goes dark; switching back releases the microphone.
+  - **The audio never leaves the operator's device** — nothing is recorded, stored or uploaded; only a single number, about 20 times a second. Audience phones are never asked for microphone access. Documented in `/privacy` (EN + PL).
+  - **The safety envelope is unchanged.** The mic value lands in the same `level` slot the compiled cue brightness feeds, so `clampColor` (no saturated red) and the ≥150 ms / ≤3 flashes-per-second backstop on the screen, and the ≤2.8/s torch gate, still run last. Proven under a 10 Hz square-wave feed.
+  - Values are clamped server-side to 0..1 and the broadcast is rate-capped at 30 frames/s per room; a room that is not in microphone mode drops incoming frames; the phone decays to darkness 1.5 s after the last frame, and the server releases the source when the console's socket closes — so a dead console can never freeze the crowd at full tilt.
+  - The public console drives this over its existing socket, elevated by a token-verified `micauth` that grants exactly two commands (`mic`, `lvl`) for the room in its own token; an ordinary phone's socket in the same room cannot switch the source.
+- **Verified end to end** by `test/round16_qr_mic.mjs` (37 checks against a running server), including a real `getUserMedia` stream driving the real `/studio` UI and a real phone's screen.
+
+### Fixed
+
+- **"Selected loop" played tracks nobody ticked.** Two defects combined: the console's ticked ids were sanitised with `selected.map(Number)`, which turns a room's OWN upload id (`g:<room>:<id6>` — a string since round 12) into `NaN` and drops it; and an empty/unresolvable selection then fell through to *loop everything*, the exact opposite of what the button promises. The same fall-through fired on the very first click, because the tick boxes only exist once the mode already is `selected`. Now: guest string ids survive server-side validation (this room's prefix + charset, positive numeric ids only), an empty selection collapses to the single armed track instead of the library, the first switch seeds the selection with the track that is playing, and the console reports how many tracks are actually in the loop. Covered by `test/playlist_selected.mjs`, which fails against the previous commit and passes against this one.
+- Committed the Cat Conga game-handoff (Phase D) that had been deployed to the live server but never landed in git — `hub.gamePrefetch`/`gameLaunch`, the `/api/{operator,console}/game-*` routes and the phone-side `prefetch`/`game` handlers.
+
 ## [0.16.2] - 2026-07-01
 
 ### Changed / Fixed

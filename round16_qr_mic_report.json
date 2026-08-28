@@ -1,0 +1,179 @@
+{
+  "base": "http://localhost:4201",
+  "checks": {
+    "qr_serves_png": {
+      "ok": true,
+      "detail": "status=200 type=image/png bytes=3701"
+    },
+    "qr_cacheable": {
+      "ok": true,
+      "detail": "cache-control=public, max-age=3600"
+    },
+    "qr_encodes_main_join_url": {
+      "ok": true,
+      "detail": "served == QR(\"http://localhost:4201/join?s=290677\") : true"
+    },
+    "qr_room_scoped": {
+      "ok": true,
+      "detail": "room QR is its own room's join url and differs from main"
+    },
+    "qr_demo_scoped": {
+      "ok": true,
+      "detail": "demo QR is the demo join url"
+    },
+    "qr_rejects_untrusted_input": {
+      "ok": true,
+      "detail": "a non-matching room id falls back to the real show QR (no echo)"
+    },
+    "qr_visible_on_live_screen": {
+      "ok": true,
+      "detail": "hidden=false seam=true naturalWidth=600"
+    },
+    "qr_scannable_size": {
+      "ok": true,
+      "detail": "172x172 css px on a 390x844 phone, fully on screen=true"
+    },
+    "qr_clear_of_bottom_strip": {
+      "ok": true,
+      "detail": "gap to the bottom edge = 116px (waveform owns 44-88px)"
+    },
+    "qr_not_inside_flash_layer": {
+      "ok": true,
+      "detail": "the overlay is a sibling of #flash, so it cannot change the flash colour"
+    },
+    "qr_does_not_stop_the_show": {
+      "ok": true,
+      "detail": "everLit=true lastBg=rgb(44,15,84) frames=152"
+    },
+    "qr_hide_button": {
+      "ok": true,
+      "detail": "card hidden=true pill shown=true"
+    },
+    "qr_collapse_persists": {
+      "ok": true,
+      "detail": "still collapsed after a reload: {\"shown\":false,\"collapsed\":true,\"src\":\"/api/audience/qr\"}"
+    },
+    "qr_expand": {
+      "ok": true,
+      "detail": "card shown=true pill hidden=true"
+    },
+    "qr_hidden_after_leave": {
+      "ok": true,
+      "detail": "both the card and the pill are gone once the phone leaves"
+    },
+    "mic_requires_auth": {
+      "ok": true,
+      "detail": "mic=401 mic-level=401"
+    },
+    "mic_level_dropped_when_off": {
+      "ok": true,
+      "detail": "server={\"ok\":false,\"error\":\"mic off\"} phone frames=0"
+    },
+    "mic_mode_reaches_phone": {
+      "ok": true,
+      "detail": "the phone flipped its light source to the microphone"
+    },
+    "mic_level_tracks_the_feed": {
+      "ok": true,
+      "detail": "loud level=0.95 quiet level=0.02 frames=44"
+    },
+    "mic_drives_the_crowd_screen": {
+      "ok": true,
+      "detail": "screen luminance loud=0.837 quiet=0.102 (rgb [224,207,247] vs [43,15,84])"
+    },
+    "mic_respects_flash_governor": {
+      "ok": true,
+      "detail": "1 flashes in 3.3s = 0.30/s under a 10 Hz square-wave mic feed (WCAG 2.3.2 cap is 3/s)"
+    },
+    "mic_rate_capped": {
+      "ok": true,
+      "detail": "4 frames reached the phone in 0.26s = 15.6/s (server cap 30/s)"
+    },
+    "mic_clamps_out_of_range": {
+      "ok": true,
+      "detail": "v=5 -> 1 (clamped, never >1) · v=-3 -> 0 · v=\"not-a-number\" -> 0"
+    },
+    "mic_stale_feed_decays": {
+      "ok": true,
+      "detail": "level 0.001 ~2.6s after the last frame (watchdog is 1.5s)"
+    },
+    "mic_off_restores_default": {
+      "ok": true,
+      "detail": "mic.on=false level=0 late push accepted=false"
+    },
+    "qr_dark_on_blackout": {
+      "ok": true,
+      "detail": "BLACKOUT hides the QR card and the pill (screen rgb(0,0,0))"
+    },
+    "qr_returns_after_blackout": {
+      "ok": true,
+      "detail": "the QR comes back once the blackout is lifted"
+    },
+    "mic_off_replayed_on_rejoin": {
+      "ok": true,
+      "detail": "a phone joining after the source went back to internal is told so (mic.on=false)"
+    },
+    "arm_releases_mic_source": {
+      "ok": true,
+      "detail": "arming track #1 switched the room back to the internal source (mic.on=false)"
+    },
+    "mic_ws_rejects_unelevated_socket": {
+      "ok": true,
+      "detail": "a plain audience socket in the room could not switch the source (on=false, frames=0)"
+    },
+    "mic_ws_elevates_console": {
+      "ok": true,
+      "detail": "micauth reply = true"
+    },
+    "mic_ws_drives_the_room": {
+      "ok": true,
+      "detail": "level=0.95 over 24 frames on the WS path"
+    },
+    "mic_survives_other_socket_close": {
+      "ok": true,
+      "detail": "a non-owning elevated socket closing left the live feed alone (mic.on=true)"
+    },
+    "mic_released_on_console_disconnect": {
+      "ok": true,
+      "detail": "mic.on=false after the console socket closed"
+    },
+    "mic_room_isolation": {
+      "ok": true,
+      "detail": "the main show's phone stayed on its own source (mic.on=false)"
+    },
+    "e2e_console_socket_elevated": {
+      "ok": true,
+      "detail": "the /studio console elevated its own socket for the mic stream"
+    },
+    "e2e_mic_capture_running": {
+      "ok": true,
+      "detail": "getUserMedia is live: peak rms=0.6747 peak level=0.00 over 2.4s · frames sent=96 over ws"
+    },
+    "e2e_mic_panel_shown": {
+      "ok": true,
+      "detail": "the meter + sensitivity panel appears when the microphone is the source"
+    },
+    "e2e_phone_follows_the_microphone": {
+      "ok": true,
+      "detail": "the phone is on the mic source with 91 frames, running preset \"pulse\" (rgb [58,20,112])"
+    },
+    "e2e_level_actually_modulates": {
+      "ok": true,
+      "detail": "phone-side level swing over 2.4s = 0.500 (min 0.00 max 0.50)"
+    },
+    "e2e_switch_back_to_internal": {
+      "ok": true,
+      "detail": "console mic off=true, phone back on the internal source (level 0)"
+    },
+    "e2e_no_console_errors": {
+      "ok": true,
+      "detail": "the operator console threw nothing while running the microphone"
+    },
+    "no_page_errors": {
+      "ok": true,
+      "detail": "no unexpected console/page errors on the audience client"
+    }
+  },
+  "fails": [],
+  "ok": true
+}
