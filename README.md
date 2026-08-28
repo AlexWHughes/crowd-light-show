@@ -13,6 +13,16 @@
 
 **▶ Try it now:** [lightshow.flyreelstudio.eu/try](https://lightshow.flyreelstudio.eu/try) — open the demo, scan the QR with your phone, and watch your own screen join the show.
 
+<p align="center">
+  <a href="https://github.com/AndriiShramko/crowd-light-show/blob/main/public/shots/promo.mp4">
+    <img src="public/shots/hero.jpg" alt="Crowd Light Show landing page — Your crowd is the light show" width="720">
+  </a>
+</p>
+
+**🎥 See it in action (6 min):** [Watch on GitHub](https://github.com/AndriiShramko/crowd-light-show/blob/main/public/shots/promo.mp4) · [Watch on YouTube (mirror)](https://youtu.be/lqK1PEZY50A)
+
+**🐱 Coming next — Cat Conga:** when the show ends, the crowd falls into a shared 3D (Gaussian-Splatting) world as cats forming one giant conga chain, then finds each other in the *real* crowd. [Design docs](docs/game/README.md) (planned, not built yet).
+
 ---
 
 ## 20-second demo (self-hosted)
