@@ -1036,8 +1036,8 @@
   // quiet sits and how far the sound is clearing it, otherwise "sensitivity" is guesswork.
   function micMeterDraw() {
     var c = $('micMeter'); if (!c || !c.getContext) return;
-    if (!c.width || c.width < 8) { c.width = c.clientWidth || 320; c.height = 46; }
-    var g = c.getContext('2d'), w = c.width, h = c.height, bar = h - 14;
+    if (!c.width || c.width < 8) { c.width = c.clientWidth || 320; c.height = 64; }
+    var g = c.getContext('2d'), w = c.width, h = c.height, bar = h - 20;
     g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
     // what the crowd gets
     var grad = g.createLinearGradient(0, 0, w, 0);
@@ -1048,9 +1048,9 @@
     g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(Math.min(w - 2, xOf(micDb)), 0, 2, bar);
     g.strokeStyle = 'rgba(255,255,255,.45)'; g.setLineDash([3, 3]); g.lineWidth = 1;
     g.beginPath(); g.moveTo(xOf(micFloorDb) + 0.5, 0); g.lineTo(xOf(micFloorDb) + 0.5, bar); g.stroke(); g.setLineDash([]);
-    g.font = '10px system-ui, sans-serif'; g.textBaseline = 'bottom';
+    g.font = '11px system-ui, sans-serif'; g.textBaseline = 'bottom';
     g.fillStyle = micOpen ? '#9fe8a0' : 'rgba(255,255,255,.5)';
-    g.fillText((micOpen ? '+' : '') + (micOverDb > -99 ? micOverDb.toFixed(0) : '--') + ' dB over the room' + (micOpen ? '' : ' (below the gate)'), 2, h - 1);
+    g.fillText((micOpen ? '+' : '') + (micOverDb > -99 ? micOverDb.toFixed(0) : '--') + ' dB ' + tr('console.mic_over_room', 'over the room') + (micOpen ? '' : ' — ' + tr('console.mic_below_gate', 'below the gate, ignored')), 3, h - 3);
   }
 
   function micFrame(now) {
@@ -1088,8 +1088,17 @@
   }
 
   function srcMsg(text) { var e = $('srcMsg'); if (e) e.textContent = text || ''; }
+  // The readout is written by the slider's own input handler, so before the operator has touched it
+  // the panel still showed the static markup ("1.00x") with no idea of what that means in dB.
+  function micGainLabel() {
+    var v = $('micGainVal'); if (!v || !window.CLS_MIC) return;
+    var rd = window.CLS_MIC.rangeDbFor(micGainV);
+    v.textContent = rd == null ? tr('console.mic_off_short', 'off') : (micGainV.toFixed(2) + '× · ' + Math.round(rd) + ' dB');
+  }
+
   function renderSource() {
     var bi = $('srcInternal'), bm = $('srcMic'), panel = $('micPanel');
+    micGainLabel();
     if (bi) { bi.className = micOn ? 'ghost' : 'primary'; bi.style.width = 'auto'; }
     if (bm) { bm.className = micOn ? 'primary' : 'ghost'; bm.style.width = 'auto'; }
     if (panel) { if (micOn) panel.classList.remove('hidden'); else panel.classList.add('hidden'); }
@@ -1169,11 +1178,7 @@
   if ($('micGain')) $('micGain').addEventListener('input', function () {
     var gv = Number($('micGain').value);
     micGainV = (gv === gv) ? gv : 1;      // 0 is a legitimate setting — do NOT fall back to 1 on zero
-    var v = $('micGainVal');
-    if (v) {
-      var rd = window.CLS_MIC ? window.CLS_MIC.rangeDbFor(micGainV) : null;
-      v.textContent = rd == null ? tr('console.mic_off_short', 'off') : (micGainV.toFixed(2) + '× · ' + Math.round(rd) + ' dB');
-    }
+    micGainLabel();
   });
   // A backgrounded or closed console must not leave the crowd on a feed nobody is producing. The
   // server releases the source on socket close and the phone decays to 0 after 1.5 s — this is the
@@ -1298,7 +1303,7 @@
     }
     // momentary flash pad: hold -> flash on, release -> off (double-tap latches)
     function flashPad() {
-      var pad = document.createElement('div'); pad.style.cssText = 'width:120px;height:180px;border-radius:14px;background:#241a10;border:1px solid rgba(255,200,80,.4);display:flex;align-items:center;justify-content:center;font:700 14px system-ui;color:#ffd98a;text-align:center;touch-action:none;cursor:pointer;flex:0 0 auto';
+      var pad = document.createElement('div'); pad.style.cssText = 'width:120px;height:min(52vh,420px);min-height:300px;border-radius:14px;background:#241a10;border:1px solid rgba(255,200,80,.4);display:flex;align-items:center;justify-content:center;font:700 14px system-ui;color:#ffd98a;text-align:center;touch-action:none;cursor:pointer;flex:0 0 auto';
       pad.textContent = 'FLASH\n(hold)'; pad.style.whiteSpace = 'pre-line'; var latched = false;
       bindDrag(pad, function (e) { var r = pad.getBoundingClientRect(); st.flash = clamp01((r.bottom - e.clientY) / r.height) || 1; if (st.flash < 0.2) st.flash = 1; pad.style.background = '#ffd98a'; push(); },
         function () { st.flash = 1; pad.style.background = '#ffd98a'; push(); },

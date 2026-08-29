@@ -1,5 +1,5 @@
 {
-  "base": "https://lightshow.flyreelstudio.eu",
+  "base": "http://localhost:5501",
   "checks": {
     "mic_module_loaded": {
       "ok": true,
@@ -7,15 +7,15 @@
     },
     "mic_reports_db_against_a_floor": {
       "ok": true,
-      "detail": "loudest frame in 2 s: input -41.1 dB, tracked room floor -96.1 dB, 55.0 dB over (gate open)"
+      "detail": "loudest frame in 2 s: input -43.5 dB, tracked room floor -98.5 dB, 55.0 dB over (gate open)"
     },
     "mic_is_sending": {
       "ok": true,
-      "detail": "105 frames on the wire"
+      "detail": "104 frames on the wire"
     },
     "a_real_signal_opens_the_gate": {
       "ok": true,
-      "detail": "the gate opened in 6/30 samples (the fake device's duty cycle) with a peak level of 1.00"
+      "detail": "the gate opened in 5/30 samples (the fake device's duty cycle) with a peak level of 1.00"
     },
     "sensitivity_cannot_light_up_a_silent_room": {
       "ok": true,
