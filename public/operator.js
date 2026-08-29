@@ -995,7 +995,8 @@
   // torch channel react to the real music while clampColor + backstop (<=3 fl/s) and torchGate
   // (<=2.8/s) still run last: the epilepsy envelope is identical to the internal-music path.
   var micStream = null, micCtx = null, micAnalyser = null, micData = null, micRaf = null;
-  var micOn = false, micStarting = false, micWsAuthed = false, micAGC = null, micGainV = 1;
+  var micOn = false, micStarting = false, micWsAuthed = false, micStep = null, micGainV = 1;
+  var micFreq = null, micDb = -140, micFloorDb = -140, micOverDb = 0, micOpen = false;
   var micWake = null, micHttpInFlight = false;
   var micLastAt = 0, micLastSend = 0, micLevel = 0, micRms = 0, micSent = 0;
   // What the CROWD is actually acting on: the last value we put on the wire, smoothed with the same
@@ -1004,23 +1005,14 @@
   // the two would visibly disagree even though nothing is wrong.
   var micSentLevel = 0, micPreviewLevel = 0, micPrevAt = 0;
   var MIC_HZ = 20;                       // frames/s pushed to the room (the server hard-caps at 30)
-  window.__opMic = { on: false, authed: false, level: 0, rms: 0, rmsPeak: 0, sent: 0, err: null, transport: null }; // test seam (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
+  window.__opMic = { on: false, authed: false, level: 0, rms: 0, rmsPeak: 0, sent: 0, err: null, transport: null,
+    db: -140, floorDb: -140, overDb: 0, open: false }; // test seam (rmsPeak: running peak; db/floorDb: the dB view the meter draws) (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
 
-  // Rolling floor/ceiling normaliser: the venue's own dynamic window, so the lights swing fully
-  // whether the mic hears a quiet acoustic set or a wall of PA. Floor rises slowly / falls fast,
-  // ceiling catches a hit fast / decays slowly — the same shape as the round-13 torch AGC.
-  function makeLevelAGC() {
-    var F = 0, C = 0, init = false, MIN_SPAN = 0.06;
-    function k(tauS, dtMs) { return 1 - Math.exp(-(dtMs / 1000) / Math.max(0.001, tauS)); }
-    return function (raw, dtMs) {
-      raw = Math.max(0, Math.min(1, raw || 0)); dtMs = Math.max(1, Math.min(200, dtMs || 50));
-      if (!init) { F = raw; C = raw + MIN_SPAN; init = true; }
-      F += (raw > F ? k(4.0, dtMs) : k(0.30, dtMs)) * (raw - F);
-      C += (raw > C ? k(0.08, dtMs) : k(3.0, dtMs)) * (raw - C);
-      var span = Math.max(MIN_SPAN, C - F);
-      return Math.max(0, Math.min(1, (raw - F) / span));
-    };
-  }
+  // The level maths lives in public/miclevel.js (unit-tested in test/mic_level.test.mjs). The old
+  // rolling floor/ceiling normaliser that used to sit here was the wrong tool for a live microphone:
+  // it stretched WHATEVER it was given across the full range, so a quiet room's own hiss became a
+  // full light show while a voice got flattened, and the sensitivity slider — a multiply on the
+  // already-normalised value — made the noise worse and the voice no better.
 
   // One loudness frame to the room. The WebSocket is the real path (a 20 Hz HTTP POST stream would
   // be absurd on a phone); the HTTP route is the fallback while the socket is down or unelevated.
@@ -1040,30 +1032,40 @@
       .then(function () { micHttpInFlight = false; });
   }
 
+  // The meter is a dB view, not a bare bar: the operator has to be able to SEE where this room's own
+  // quiet sits and how far the sound is clearing it, otherwise "sensitivity" is guesswork.
   function micMeterDraw() {
     var c = $('micMeter'); if (!c || !c.getContext) return;
-    if (!c.width || c.width < 8) { c.width = c.clientWidth || 320; c.height = 34; }
-    var g = c.getContext('2d'), w = c.width, h = c.height;
+    if (!c.width || c.width < 8) { c.width = c.clientWidth || 320; c.height = 46; }
+    var g = c.getContext('2d'), w = c.width, h = c.height, bar = h - 14;
     g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    // what the crowd gets
     var grad = g.createLinearGradient(0, 0, w, 0);
     grad.addColorStop(0, '#2bc0ee'); grad.addColorStop(0.7, '#5aa0ff'); grad.addColorStop(1, '#ffd98a');
-    g.fillStyle = grad; g.fillRect(0, 0, Math.round(w * micLevel), h);
-    // a thin raw-RMS tick, so the operator can tell "no sound is reaching the mic" from "the AGC is flat"
-    g.fillStyle = 'rgba(255,255,255,.8)'; g.fillRect(Math.min(w - 2, Math.round(w * Math.min(1, micRms * 4))), 0, 2, h);
+    g.fillStyle = grad; g.fillRect(0, 0, Math.round(w * micLevel), bar);
+    // the input itself on a -90..0 dB scale, and this room's tracked quiet as a dashed line
+    var xOf = function (db) { return Math.max(0, Math.min(w, w * (db + 90) / 90)); };
+    g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(Math.min(w - 2, xOf(micDb)), 0, 2, bar);
+    g.strokeStyle = 'rgba(255,255,255,.45)'; g.setLineDash([3, 3]); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(xOf(micFloorDb) + 0.5, 0); g.lineTo(xOf(micFloorDb) + 0.5, bar); g.stroke(); g.setLineDash([]);
+    g.font = '10px system-ui, sans-serif'; g.textBaseline = 'bottom';
+    g.fillStyle = micOpen ? '#9fe8a0' : 'rgba(255,255,255,.5)';
+    g.fillText((micOpen ? '+' : '') + (micOverDb > -99 ? micOverDb.toFixed(0) : '--') + ' dB over the room' + (micOpen ? '' : ' (below the gate)'), 2, h - 1);
   }
 
   function micFrame(now) {
     micRaf = requestAnimationFrame(micFrame);
-    if (!micAnalyser || !micData) return;
-    micAnalyser.getByteTimeDomainData(micData);
-    var sum = 0;
-    for (var i = 0; i < micData.length; i++) { var d = (micData[i] - 128) / 128; sum += d * d; }
-    micRms = Math.sqrt(sum / micData.length);
-    // RMS -> a perceptual 0..1 over a 60 dB window, so a normal room does not sit pinned near zero
-    var loud = Math.max(0, Math.min(1, (20 * Math.log(Math.max(1e-4, micRms)) / Math.LN10 + 60) / 60));
+    if (!micAnalyser || !micFreq || !micStep) return;
+    // A band-limited spectrum, not a wideband RMS: the rumble below ~120 Hz and the hiss above ~7 kHz
+    // are precisely the "quiet noise" that used to drive the lights, and neither carries the beat.
+    micAnalyser.getFloatFrequencyData(micFreq);
+    micDb = window.CLS_MIC.bandDb(micFreq, micCtx ? micCtx.sampleRate : 48000, micAnalyser.fftSize);
     var dt = micLastAt ? now - micLastAt : 50; micLastAt = now;
-    micLevel = Math.max(0, Math.min(1, micAGC(loud, dt) * micGainV));
+    var r = micStep(micDb, dt, window.CLS_MIC.rangeScaleFor(micGainV));
+    micLevel = r.level; micFloorDb = r.floorDb; micOverDb = r.overDb; micOpen = r.open;
+    micRms = Math.max(0, Math.min(1, (micDb + 90) / 90));   // 0..1 view of the raw input, for the meter
     window.__opMic.level = micLevel; window.__opMic.rms = micRms;
+    window.__opMic.db = micDb; window.__opMic.floorDb = micFloorDb; window.__opMic.overDb = micOverDb; window.__opMic.open = micOpen;
     if (micRms > window.__opMic.rmsPeak) window.__opMic.rmsPeak = micRms;
     micMeterDraw();
     if (now - micLastSend >= 1000 / MIC_HZ) { micLastSend = now; micSend(micLevel); }
@@ -1112,10 +1114,11 @@
         micCtx = new AC();
         if (micCtx.resume) { var rp = micCtx.resume(); if (rp && rp['catch']) rp['catch'](function () {}); }
         micAnalyser = micCtx.createAnalyser();
-        micAnalyser.fftSize = 1024; micAnalyser.smoothingTimeConstant = 0;
+        micAnalyser.fftSize = 2048; micAnalyser.smoothingTimeConstant = 0.15;   // enough resolution to band-limit
         micCtx.createMediaStreamSource(st).connect(micAnalyser);   // analyser ONLY — never to destination (that would howl)
         micData = new Uint8Array(micAnalyser.fftSize);
-        micAGC = makeLevelAGC(); micLastAt = 0; micLastSend = 0; micLevel = 0; micRms = 0;
+        micFreq = new Float32Array(micAnalyser.frequencyBinCount);
+        micStep = window.CLS_MIC.makeMicLevel(); micLastAt = 0; micLastSend = 0; micLevel = 0; micRms = 0; micDb = -140; micFloorDb = -140; micOverDb = 0; micOpen = false;
         window.__opMic.rmsPeak = 0;
         micOn = true; micStarting = false; window.__opMic.err = null;
         renderSource();
@@ -1155,7 +1158,7 @@
     if (micRaf) { cancelAnimationFrame(micRaf); micRaf = null; }
     if (micStream) { try { micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} micStream = null; }
     if (micCtx) { try { micCtx.close(); } catch (e) {} micCtx = null; }
-    micAnalyser = null; micData = null; micAGC = null; micLevel = 0; micRms = 0;
+    micAnalyser = null; micData = null; micFreq = null; micStep = null; micLevel = 0; micRms = 0; micOpen = false;
     micMeterDraw(); renderSource();
     if (was) { silenceLocalPlayer(); tx('mic', { on: false }); ga('mic_source', { on: 0 }); }
     if (!quiet) srcMsg(tr('console.mic_off', 'Back to the internal music. Press Start (or GO) to play a track again.'));
@@ -1166,7 +1169,11 @@
   if ($('micGain')) $('micGain').addEventListener('input', function () {
     var gv = Number($('micGain').value);
     micGainV = (gv === gv) ? gv : 1;      // 0 is a legitimate setting — do NOT fall back to 1 on zero
-    var v = $('micGainVal'); if (v) v.textContent = micGainV.toFixed(2) + '×';
+    var v = $('micGainVal');
+    if (v) {
+      var rd = window.CLS_MIC ? window.CLS_MIC.rangeDbFor(micGainV) : null;
+      v.textContent = rd == null ? tr('console.mic_off_short', 'off') : (micGainV.toFixed(2) + '× · ' + Math.round(rd) + ' dB');
+    }
   });
   // A backgrounded or closed console must not leave the crowd on a feed nobody is producing. The
   // server releases the source on socket close and the phone decays to 0 after 1.5 s — this is the
@@ -1178,7 +1185,7 @@
     if (!micOn) return;
     if (document.hidden) { srcMsg(tr('console.mic_hidden', 'Microphone paused — this page must stay open and unlocked while it drives the lights.')); }
     else {
-      micLastAt = 0; micLastSend = 0; micAGC = makeLevelAGC();     // the AGC window is stale after a gap
+      micLastAt = 0; micLastSend = 0; if (window.CLS_MIC) micStep = window.CLS_MIC.makeMicLevel();   // the noise-floor estimate is stale after a gap
       if (!micRaf) micRaf = requestAnimationFrame(micFrame);
       try { if (navigator.wakeLock && !micWake) navigator.wakeLock.request('screen').then(function (w) { micWake = w; })['catch'](function () {}); } catch (e) {}
       srcMsg(tr('console.mic_live', 'LIVE from the microphone — the crowd follows what this device hears.'));
@@ -1237,7 +1244,8 @@
     var HUEGRAD = 'linear-gradient(to top,' + [0, 60, 120, 180, 240, 300, 360].map(function (h) { return 'hsl(' + h + ',100%,50%)'; }).join(',') + ')';
     function vFader(label, get, set, grad, isHue) {
       var col = document.createElement('div'); col.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:56px';
-      var track = document.createElement('div'); track.style.cssText = 'position:relative;width:52px;height:170px;border-radius:12px;background:' + (grad || '#1b2030') + ';border:1px solid rgba(255,255,255,.15);touch-action:none;overflow:hidden;cursor:ns-resize';
+      var track = document.createElement('div'); track.className = 'vj-fader-track';
+      track.style.cssText = 'position:relative;width:52px;height:min(52vh,420px);min-height:300px;border-radius:12px;background:' + (grad || '#1b2030') + ';border:1px solid rgba(255,255,255,.15);touch-action:none;overflow:hidden;cursor:ns-resize';
       var fill = document.createElement('div'); if (!grad) fill.style.cssText = 'position:absolute;left:0;right:0;bottom:0;background:rgba(120,160,255,.30)';
       var thumb = document.createElement('div'); thumb.style.cssText = 'position:absolute;left:3px;right:3px;height:26px;border-radius:8px;background:#eaf2ff;box-shadow:0 1px 5px rgba(0,0,0,.6)';
       if (!grad) track.appendChild(fill); track.appendChild(thumb);
@@ -1245,7 +1253,11 @@
       var val = document.createElement('div'); val.style.cssText = 'font:600 12px system-ui;color:#9fb0cc';
       col.appendChild(lab); col.appendChild(track); col.appendChild(val);
       bindDrag(track, function (e) { var r = track.getBoundingClientRect(); set(clamp01((r.bottom - e.clientY) / r.height)); push(); });
-      painters.push(function () { var v = get(); thumb.style.bottom = (v * (170 - 26)) + 'px'; if (!grad) fill.style.height = (v * 170) + 'px'; val.textContent = isHue ? Math.round(v * 360) + '°' : Math.round(v * 100) + '%'; });
+      painters.push(function () {
+        var v = get(), th = track.clientHeight || 170;
+        thumb.style.bottom = (v * Math.max(0, th - 26)) + 'px'; if (!grad) fill.style.height = (v * th) + 'px';
+        val.textContent = isHue ? Math.round(v * 360) + '°' : Math.round(v * 100) + '%';
+      });
       return col;
     }
     var satF = function () { return vFader('Sat', function () { return st.sat; }, function (v) { st.sat = v; }); };
@@ -1270,12 +1282,18 @@
     }
     // XY pad: x -> hue, y -> brightness. Background painted as a hue x value gradient.
     function xyPad() {
-      var box = document.createElement('div'); box.style.cssText = 'position:relative;width:210px;height:180px;flex:0 0 auto;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.15);touch-action:none;background:' +
+      // Fills the width it is given and stands tall: picking a colour by dragging needs room, and the
+      // old fixed 210x180 box made hue changes jumpy — a whole hue rotation across 210 px is under
+      // 2 px per degree. The cursor now reads the box's REAL size, so it follows any size.
+      var box = document.createElement('div'); box.style.cssText = 'position:relative;flex:1 1 320px;min-width:240px;height:min(52vh,420px);min-height:300px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.15);touch-action:none;background:' +
         'linear-gradient(to top,#000,rgba(0,0,0,0)),linear-gradient(to right,' + [0, 60, 120, 180, 240, 300, 360].map(function (h) { return 'hsl(' + h + ',100%,50%)'; }).join(',') + ')';
-      var dot = document.createElement('div'); dot.style.cssText = 'position:absolute;width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 4px #000;pointer-events:none;transform:translate(-50%,-50%)';
+      var dot = document.createElement('div'); dot.style.cssText = 'position:absolute;width:26px;height:26px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 6px #000;pointer-events:none;transform:translate(-50%,-50%)';
       box.appendChild(dot);
       bindDrag(box, function (e) { var r = box.getBoundingClientRect(); st.hue = clamp01((e.clientX - r.left) / r.width) * 360; st.bri = clamp01((r.bottom - e.clientY) / r.height); push(); });
-      painters.push(function () { dot.style.left = (st.hue / 360 * 210) + 'px'; dot.style.top = ((1 - st.bri) * 180) + 'px'; });
+      painters.push(function () {
+        var w = box.clientWidth || 240, h = box.clientHeight || 300;
+        dot.style.left = (st.hue / 360 * w) + 'px'; dot.style.top = ((1 - st.bri) * h) + 'px';
+      });
       return box;
     }
     // momentary flash pad: hold -> flash on, release -> off (double-tap latches)
@@ -1307,7 +1325,7 @@
       clearStage();
       if (tab === 'faders') { stage.appendChild(row([satF(), hueF(), briF(), flashF()])); }
       else if (tab === 'wheel') { stage.appendChild(row([wheel(), briF(), flashF()])); }
-      else if (tab === 'xy') { stage.appendChild(row([satF(), xyPad(), flashPad()])); }
+      else if (tab === 'xy') { var xr = row([satF(), xyPad(), flashPad()]); xr.style.flexWrap = 'wrap'; stage.appendChild(xr); }
       else { // big pads
         var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px';
         var r1 = document.createElement('div'); r1.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';

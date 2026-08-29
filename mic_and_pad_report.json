@@ -1,0 +1,51 @@
+{
+  "base": "http://localhost:5601",
+  "checks": {
+    "mic_module_loaded": {
+      "ok": true,
+      "detail": "the console loads the microphone level module"
+    },
+    "mic_reports_db_against_a_floor": {
+      "ok": true,
+      "detail": "loudest frame in 2 s: input -43.8 dB, tracked room floor -98.8 dB, 55.0 dB over (gate open)"
+    },
+    "mic_is_sending": {
+      "ok": true,
+      "detail": "86 frames on the wire"
+    },
+    "a_real_signal_opens_the_gate": {
+      "ok": true,
+      "detail": "the gate opened in 7/30 samples with a peak level of 1.00"
+    },
+    "sensitivity_cannot_light_up_a_silent_room": {
+      "ok": true,
+      "detail": "steady room noise stays gated at sensitivity 1 and at 3 (levels 0 / 0)"
+    },
+    "sensitivity_zero_is_off": {
+      "ok": true,
+      "detail": "level 0, slider reads \"off\""
+    },
+    "sensitivity_readout_is_in_db": {
+      "ok": true,
+      "detail": "the slider says what it does: \"1.00× · 45 dB\""
+    },
+    "xy_pad_is_big_enough_to_drag": {
+      "ok": true,
+      "detail": "603x420 css px (was 210x180 — under 2 px per degree of hue)"
+    },
+    "xy_pad_sweeps_the_whole_range": {
+      "ok": true,
+      "detail": "dragging corner to corner moved hue 2° -> 358° and brightness to 0.85"
+    },
+    "xy_cursor_tracks_the_real_size": {
+      "ok": true,
+      "detail": "the cursor sits at 99% across and 15% down — it follows the pad's actual size, not a hard-coded 210x180"
+    },
+    "no_console_errors": {
+      "ok": true,
+      "detail": "nothing thrown"
+    }
+  },
+  "fails": [],
+  "ok": true
+}

@@ -1,5 +1,5 @@
 {
-  "base": "http://localhost:5301",
+  "base": "http://localhost:5602",
   "checks": {
     "mic_gain_reaches_zero": {
       "ok": true,
@@ -15,11 +15,11 @@
     },
     "preview_is_anchored_to_the_room": {
       "ok": true,
-      "detail": "the console renders the preview off the room's own preset anchor (startedAt=51660.56970000267, clock synced=true)"
+      "detail": "the console renders the preview off the room's own preset anchor (startedAt=12181.028199999942, clock synced=true)"
     },
     "preview_matches_the_crowd": {
       "ok": true,
-      "detail": "the console's bar for phone #1 vs that phone itself, time-aligned within 25 ms over 240 pairs: median |dL| 0.000, p90 0.000 (a free-running preview drifts across the whole range)"
+      "detail": "the console's bar for phone #1 vs that phone itself, time-aligned within 25 ms over 241 pairs: median |dL| 0.000, p90 0.000 (a free-running preview drifts across the whole range)"
     },
     "preview_has_a_bar_per_phone": {
       "ok": true,
@@ -31,7 +31,7 @@
     },
     "source_switch_silences_the_operators_own_player": {
       "ok": true,
-      "detail": "the console's <audio> was playing (t=1.2s) and the source switch stopped it (paused=true, t=0.0s, muted=true)"
+      "detail": "the console's <audio> was playing (t=1.1s) and the source switch stopped it (paused=true, t=0.0s, muted=true)"
     },
     "switch_back_leaves_the_player_silent": {
       "ok": true,

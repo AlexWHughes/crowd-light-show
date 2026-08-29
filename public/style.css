@@ -151,6 +151,9 @@ input[type=password], input[type=text] { width: 100%; padding: 12px; border-radi
 #vjCard.vj-faux-full { position: fixed; inset: 0; z-index: 9999; margin: 0; overflow: auto; border-radius: 0; }
 #vjCard:fullscreen { overflow: auto; padding: 18px; }
 #vjStage { user-select: none; -webkit-user-select: none; touch-action: none; }
+/* round 16.2: the XY pad grew, so its vertical faders grow with it — a 170 px fader next to a 300 px
+   pad reads as broken, and the pad itself needs the room to make a hue drag precise. */
+#vjStage .vj-fader-track { height: min(52vh, 420px); min-height: 300px; }
 
 /* round 15c: audience /join — grandma-test flow. One big confirm button on the first screen; after it,
    a prominent flashlight join + a quiet screen-only fallback so people reach for the flashlight more. */

@@ -1,0 +1,8 @@
+{
+  "base": "http://localhost:5610",
+  "min": 0.1635513725490196,
+  "max": 0.6470588235294118,
+  "nonBlack": 30,
+  "samples": 30,
+  "fails": []
+}

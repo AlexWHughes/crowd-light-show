@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-08-29
+
+### Fixed
+
+- **The microphone reacted to quiet room noise and barely to a voice — and turning the sensitivity up made the noise worse.** That was not a tuning problem, it was the wrong tool: the level ran through a rolling floor/ceiling normaliser (the shape the torch AGC uses on a *compiled* music envelope), and a normaliser stretches **whatever** it is given across the full range. In a quiet room the floor and the ceiling converge on the room's own hiss, the span hits its minimum, and a couple of dB of noise become a full light show; a voice instantly lifts the ceiling and gets flattened. The sensitivity slider then multiplied that already-normalised value, so it amplified the noise and did nothing for the voice.
+
+  The chain now **measures in dB against a tracked noise floor** (`public/miclevel.js`, unit-tested in `test/mic_level.test.mjs`):
+  - **band-limited** to roughly 50 Hz – 9 kHz with the ends rolled off — below ~120 Hz is handling noise and rumble, above ~7 kHz is microphone hiss, which is precisely what used to drive the lights and carries no beat;
+  - the **noise floor is tracked by minimum statistics** — fast down, half a dB per second up — so music and speech cannot teach it that they are silence, while a room that genuinely goes quiet is followed at once;
+  - a **gate with hysteresis**, then a fixed dB range above the floor mapped onto 0..1: silence is a real zero, and a voice 20 dB over the floor lands in the middle of the range;
+  - **sensitivity compresses the range and never moves the gate**, so it lifts a distant voice while no setting of the slider can make a silent room light up — that is now structural, not a tuning choice;
+  - the floor is **seeded from the first live frame, never from the silence before the stream starts**, and can never be more than one range stale — without those, a microphone that opened in silence pinned the lights at full for minutes.
+
+  The meter now shows this: the bar is what the crowd gets, a dashed line marks the room's own quiet, and the readout says how many dB the sound is clearing it by. The slider reads in dB.
+- **The XY colour pad was too small to control.** It was a fixed 210×180 box — under 2 px per degree of hue — with the cursor position hard-coded to those same numbers, so it could never grow. It now fills the width it is given and stands `min(52vh, 420px)` tall (min 300 px), the cursor reads the box's real size, and the vertical faders beside it grew to match.
+
+
 ## [0.18.1] - 2026-08-29
 
 Four things the round-16 build got wrong, found on a real console.

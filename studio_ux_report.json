@@ -1,5 +1,5 @@
 {
-  "base": "http://localhost:3030",
+  "base": "http://localhost:5613",
   "idle": {
     "startText": "▶ Start Light Show ",
     "startVisible": true,
@@ -8,8 +8,8 @@
     "shareHidden": true,
     "stopRowHidden": true,
     "stateText": "idle",
-    "joinUrl": "http://localhost:3030/join?room=2b2f7b614b4c633e",
-    "joinHref": "http://localhost:3030/join?room=2b2f7b614b4c633e",
+    "joinUrl": "http://localhost:5613/join?room=b320b548cb44df14",
+    "joinHref": "http://localhost:5613/join?room=b320b548cb44df14",
     "advOpen": true,
     "nudgeHidden": true,
     "goHidden": true,
@@ -17,7 +17,7 @@
     "soundBtnHidden": true,
     "muteExists": true,
     "mutePrimary": "ghost reveal",
-    "preset": "rainbow_chase"
+    "preset": null
   },
   "afterStart": {
     "btn": "⏸ Pause Light Show ",
@@ -31,25 +31,31 @@
   },
   "order": [
     "cardShow",
+    "cardSource",
     "cardPlaylist",
     "cardJoin",
     "shareBlock",
     "",
-    "studioCard"
+    "studioCard",
+    "vjCard"
   ],
   "studioBlocks": [
     "cardShow",
-    "cardPlaylist",
-    "cardJoin",
-    "shareBlock",
-    "advCard"
-  ],
-  "opBlocks": [
-    "cardShow",
+    "cardSource",
     "cardPlaylist",
     "cardJoin",
     "shareBlock",
     "advCard",
+    "vjAdv"
+  ],
+  "opBlocks": [
+    "cardShow",
+    "cardSource",
+    "cardPlaylist",
+    "cardJoin",
+    "shareBlock",
+    "advCard",
+    "vjAdv",
     "cardApps",
     "cardPublicConfig"
   ],
