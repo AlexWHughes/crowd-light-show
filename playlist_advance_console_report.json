@@ -1,0 +1,55 @@
+{
+  "base": "http://localhost:5601",
+  "checks": {
+    "ticking_a_box_does_not_restart_the_room_on_another_track": {
+      "ok": true,
+      "detail": "playing g:ad449c776111f43b:ff311b41aee4 before the selection was touched, g:ad449c776111f43b:ff311b41aee4 after"
+    },
+    "two_guest_uploads_are_selected": {
+      "ok": true,
+      "detail": "the room is looping the visitor's own uploads (now on g:ad449c776111f43b:ff311b41aee4, 14000 ms)"
+    },
+    "console_plays_the_rooms_track_at_start": {
+      "ok": true,
+      "detail": "console decoded 14000 ms, the room is playing 14000 ms"
+    },
+    "the_room_advances_to_the_next_track": {
+      "ok": true,
+      "detail": "the playlist moved on 4 time(s) during the 50 s watch"
+    },
+    "console_never_plays_a_different_track_than_the_crowd": {
+      "ok": true,
+      "detail": "over 99 samples the console's own audio never disagreed with the room for more than 500 ms"
+    },
+    "the_phone_is_on_the_same_track_as_the_room": {
+      "ok": true,
+      "detail": "phone on g:ad449c776111f43b:ff311b41aee4 (249 cues), room on g:ad449c776111f43b:ff311b41aee4"
+    },
+    "live_preview_animates_during_playback": {
+      "ok": true,
+      "detail": "the preview showed 39 distinct frames over 2.8 s"
+    },
+    "live_preview_is_wired_to_the_show": {
+      "ok": true,
+      "detail": "running=true, hasTimeline=true, synced=true, crowdN=2"
+    },
+    "a_latched_manual_override_is_announced_at_the_preview": {
+      "ok": true,
+      "detail": "the console says: \"Manual control is ON (presets off) — the crowd shows your colour, not the show.\""
+    },
+    "manual_full_really_freezes_the_crowd": {
+      "ok": true,
+      "detail": "with manual-only latched the phone showed 1 colour(s): rgb(156,222,255) — the preview was telling the truth"
+    },
+    "one_click_returns_the_crowd_to_the_show": {
+      "ok": true,
+      "detail": "manual off=true, banner hidden=true, the phone moved through 16 colours again"
+    },
+    "no_console_errors": {
+      "ok": true,
+      "detail": "nothing thrown"
+    }
+  },
+  "fails": [],
+  "ok": true
+}

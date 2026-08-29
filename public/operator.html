@@ -29,6 +29,13 @@
     <div class="reveal" style="margin-top:8px">
       <span class="muted" style="font-size:.85rem" data-i18n="console.preview_label">Live preview — one bar per phone, exactly what those screens are showing right now (safety-governed):</span>
       <canvas id="mainPreview" style="width:100%;height:48px;border-radius:8px;display:block;margin-top:4px;background:#000"></canvas>
+      <!-- The manual (VJ) override replaces the whole show with one flat colour. That control lives far
+           down the page under Advanced, so once it is latched the operator sees a dead green preview and
+           reasonably concludes the preview is broken. Say it here, where they are actually looking. -->
+      <div id="manualBanner" class="hidden" style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#4a3300;border:1px solid #a97b00;font-size:13px;line-height:1.35">
+        <span id="manualBannerText">Manual control is ON — the crowd shows your colour, not the show.</span>
+        <button id="manualBannerOff" class="ghost" style="width:auto;margin-left:8px;padding:3px 10px">Back to the show</button>
+      </div>
     </div>
     <div class="row transport reveal" data-feature="transportInternals" style="margin-top:10px">
       <button id="go" class="primary">▶ GO</button>

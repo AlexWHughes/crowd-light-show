@@ -399,9 +399,15 @@ export class ShowHub {
         .map((id) => (isGuest(id) ? id : Number(id)))
         .filter((id) => typeof id === 'string' || (Number.isFinite(id) && id > 0));
     }
-    this._syncPlaylist(roomId, typeof run.trackId === 'number' ? run.trackId : (run.plOrder[0] || null));
+    // ROUND 16.4: these two tests used to ask "is the armed track a NUMBER?", which is true only of
+    // the host's curated tracks — a visitor's own upload has a string id ('g:<room>:<hash>'). So with
+    // a guest track playing the answer was always "no", and ticking a single checkbox re-armed
+    // plOrder[0] and re-GOed the whole room on a fresh T0: the crowd jumped back to the first track
+    // mid-song, every time the operator touched the selection. What the comment below always meant is
+    // "is the armed track still IN the order?" — ask that, for either kind of id.
+    this._syncPlaylist(roomId, run.trackId != null ? run.trackId : (run.plOrder[0] || null));
     // if the current track fell out of the order (e.g. switched to 'selected' without it), play order[0]
-    if (run.plOrder.length && (typeof run.trackId !== 'number' || run.plOrder.indexOf(run.trackId) < 0)) {
+    if (run.plOrder.length && (run.trackId == null || run.plOrder.indexOf(run.trackId) < 0)) {
       run.plIdx = 0;
       this.arm(run.plOrder[0], { keepPreset: true, _noPlaylistSync: true }, roomId);
       this.go(serverClock() + config.startLeadMs, roomId);

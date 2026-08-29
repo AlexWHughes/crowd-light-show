@@ -22,7 +22,7 @@
   var wantLiveAudio = false, lastAudioT0 = null;        // personal: drive audio start off the running-state echo
   var plMode = (DEFAULTS && DEFAULTS.playlist_mode) || 'all', plNow = null, plNext = null, plSelected = []; // round 10 playlist (public)
   var pubTracks = [];                                   // last-loaded public track list (for now/next titles + selected checkboxes)
-  var consoleTimeline = null, lastT0 = null;            // round 13 (pt 4): armed track's cues + running T0, so the Live preview reacts to the REAL music
+  var consoleTimeline = null, lastT0 = null, soundTrackId = null; // soundTrackId: which track this console's OWN monitor buffer holds            // round 13 (pt 4): armed track's cues + running T0, so the Live preview reacts to the REAL music
   var player = document.getElementById('player');
 
   // ROUND 9 AUDIO FIX: the console's lights were already synced (T0 carries clock.offset+nudge),
@@ -278,6 +278,8 @@
     window.__opState.armedId = armedId; window.__opState.pubTrackId = pubTrackId; window.__opState.soundOn = soundOn;
     window.__opState.plMode = plMode; window.__opState.plNow = plNow; window.__opState.plNext = plNext;
     window.__opState.plSelected = plSelected; window.__opState.curState = curState; window.__opState.audioReady = !!(audio && audio.ready && audio.ready());
+    // what the ROOM is on vs what THIS console decoded — the two used to silently diverge
+    window.__opState.roomDurMs = consoleTimeline && consoleTimeline.durationMs;
   }
 
   function renderState(st) {
@@ -424,7 +426,7 @@
       audio.init().then(function () {
         return api(trackPath).then(function (r) { return r.ok ? r.arrayBuffer() : null; });
       }).then(function (ab) {
-        if (!ab) return; return audio.cache(ab).then(function () { if (curState === 'running' && pubT0 != null) audio.start(pubT0); });
+        if (!ab) return; var want = pubTrackId; return audio.cache(ab).then(function () { soundTrackId = want; if (curState === 'running' && pubT0 != null) audio.start(pubT0); });
       }).catch(function () {});
     } else { audio.init().catch(function () {}); }
     soundOn = true;
@@ -436,11 +438,21 @@
 
   // playlist advanced to a new curated track while the console sound is on — swap the monitor audio.
   function reloadConsoleSound(id) {
-    if (!ensureAudio() || typeof id !== 'number') return;
+    // The room can move to another track without this console asking: the playlist advances at the
+    // end of a track, and setting the playlist re-arms its first entry. The console follows the
+    // LIGHTS automatically (it takes the broadcast timeline) — it must follow the SOUND too, or the
+    // operator monitors one song while the crowd hears another. This used to bail out on anything
+    // whose id was not a number, which is exactly what a visitor's OWN upload is (id 'g:<room>:..').
+    var trackPath = (typeof id === 'number') ? ('/api/operator/audio/' + id) : guestPath(id);
+    if (!ensureAudio() || !trackPath) return;
     audio.clock = clock || audio.clock;
     if (audio.dropBuffer) audio.dropBuffer();
-    audio.init().then(function () { return api('/api/operator/audio/' + id).then(function (r) { return r.ok ? r.arrayBuffer() : null; }); })
-      .then(function (ab) { if (!ab) return; return audio.cache(ab).then(function () { if (curState === 'running' && pubT0 != null) audio.start(pubT0); }); })
+    soundTrackId = null;
+    audio.init().then(function () { return api(trackPath).then(function (r) { return r.ok ? r.arrayBuffer() : null; }); })
+      .then(function (ab) {
+        if (!ab || pubTrackId !== id) return;   // the room moved on again while this was in flight
+        return audio.cache(ab).then(function () { soundTrackId = id; if (curState === 'running' && pubT0 != null) audio.start(pubT0); });
+      })
       .catch(function () {});
   }
 
@@ -570,7 +582,7 @@
     // crowdN is the FULL index space the phones are numbered in — the console itself holds one of
     // those slots, so the Live preview must use the same N the phones get, not the displayed count.
     if (m.t === 'index') { var n = Math.max(0, (m.total | 0) - 1); crowdN = Math.max(1, m.total | 0); gaPeakUpdate(n); if ($('count2')) $('count2').textContent = n; if ($('countBig')) $('countBig').textContent = n; return; } // -1: the console itself is a member
-    if (m.t === 'timeline') { var chg = (m.trackId !== pubTrackId); pubTrackId = m.trackId; consoleTimeline = m.data || null; seekSetDur(m.data && m.data.durationMs); if (chg && soundOn && typeof m.trackId === 'number') reloadConsoleSound(m.trackId); return; } // round 13 (pt 4/7): cues for the Live preview + seek range
+    if (m.t === 'timeline') { var chg = (m.trackId !== pubTrackId); pubTrackId = m.trackId; consoleTimeline = m.data || null; seekSetDur(m.data && m.data.durationMs); if (chg && soundOn) reloadConsoleSound(m.trackId); return; } // round 13 (pt 4/7): cues for the Live preview + seek range
     if (m.t === 'preset' && m.channel !== 'torch') {
       // Adopt the ROOM's screen preset, not just its anchor. If the look was changed by anything other
       // than this console's own click — the host's default applied on open, another operator, an OSC
@@ -703,7 +715,10 @@
   function consolePos() { // current track position (ms), from the playing audio cursor else the show clock
     var tl = consoleTimeline; if (!tl || !tl.durationMs) return null;
     var dur = tl.durationMs;
-    if (audio && audio.isLive && audio.isLive() && audio.playedMs) { var pm = audio.playedMs(); if (pm != null && pm >= 0) return ((pm % dur) + dur) % dur; }
+    // Only trust the local audio cursor when the monitor is actually on the ROOM's track: while it
+    // holds another song its position means nothing here, and reading it made the preview show a
+    // pattern the crowd was not seeing. Fall through to the show clock instead.
+    if (audio && audio.isLive && audio.isLive() && audio.playedMs && soundTrackId === pubTrackId) { var pm = audio.playedMs(); if (pm != null && pm >= 0) return ((pm % dur) + dur) % dur; }
     if (curState === 'running' && lastT0 != null && clock && clock.ready) return ((clock.serverNow() - lastT0) % dur + dur) % dur;
     return null;
   }
@@ -764,6 +779,28 @@
   // One backstop per previewed phone: the >=150 ms slew is stateful, so sharing one across indices
   // would smear them into each other and stop matching any real phone.
   var mpBackstops = [], mpLast = 0, MP_MAX = 48;
+  // A latched manual override is invisible from here: the VJ pult sits under "Advanced", far down the
+  // page, so the operator sees a preview stuck on one flat colour and concludes the PREVIEW is broken.
+  // It is not — the crowd really is that colour. Say so at the preview, and offer the way back.
+  var mbWas = null;
+  function manualBanner() {
+    var el = $('manualBanner'); if (!el) return;
+    var v = window.__opVJ || null, on = !!(v && v.on);
+    var key = on ? (v.mode === 'full' ? 'full' : 'intervene') : 'off';
+    if (key === mbWas) return;                       // only touch the DOM when it actually changes
+    mbWas = key;
+    el.classList[on ? 'remove' : 'add']('hidden');
+    var t = $('manualBannerText');
+    var btn = $('manualBannerOff'); if (btn) btn.textContent = tr('console.manual_back', 'Back to the show');
+    if (t && on) {
+      t.textContent = (v.mode === 'full')
+        ? tr('console.manual_full_on', 'Manual control is ON (presets off) — the crowd shows your colour, not the show.')
+        : tr('console.manual_on', 'Manual control is ON — your colour is layered over the show.');
+    }
+  }
+  if ($('manualBannerOff')) $('manualBannerOff').addEventListener('click', function () {
+    var b = $('vjEnable'); if (b && window.__opVJ && window.__opVJ.on) b.click();   // one click back to the show
+  });
   function mainPreviewFrame(now) {
     var mp = $('mainPreview'); if (!mp) return; var mc = mp.getContext ? mp.getContext('2d') : null; if (!mc) return;
     if (!mp.width || mp.width < 8) { mp.width = mp.clientWidth || 320; mp.height = 48; }
@@ -781,6 +818,7 @@
       bars.push(col);
       mc.fillStyle = col; mc.fillRect(Math.floor(i * w), 0, Math.ceil(w) + 1, mp.height);
     }
+    manualBanner();
     window.__opMainPv = { bg: bars[0], bars: bars, crowdN: crowdN, level: lvl,
       running: curState === 'running' || micOn, hasTimeline: !!consoleTimeline, mic: micOn,
       startedAt: activeStartedAt, synced: !!(clock && clock.ready) }; // test seam
