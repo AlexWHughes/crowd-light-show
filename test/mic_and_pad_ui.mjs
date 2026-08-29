@@ -53,8 +53,11 @@ async function main() {
     if (s.open) openFrames++; peak = Math.max(peak, s.level);
     await sleep(100);
   }
-  check('a_real_signal_opens_the_gate', openFrames > 5 && peak > 0.15,
-    `the gate opened in ${openFrames}/30 samples with a peak level of ${peak.toFixed(2)}`);
+  // Chromium's fake device beeps on roughly a 1-in-6 duty cycle, so a handful of open samples out of
+  // 30 is what a WORKING chain looks like here; the claim under test is that a real signal clears the
+  // gate and reaches a real level, not that it is loud continuously.
+  check('a_real_signal_opens_the_gate', openFrames >= 3 && peak > 0.15,
+    `the gate opened in ${openFrames}/30 samples (the fake device's duty cycle) with a peak level of ${peak.toFixed(2)}`);
 
   // THE COMPLAINT: turning sensitivity up must not turn the room's own noise into a light show. The
   // fake device is a real signal, so the honest test of "noise never lights up" is the maths (unit
