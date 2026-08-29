@@ -124,5 +124,64 @@
     return s == null ? null : Math.max(6, (rangeDb == null ? 45 : rangeDb) / s);
   }
 
-  global.CLS_MIC = { bandDb: bandDb, makeMicLevel: makeMicLevel, rangeScaleFor: rangeScaleFor, rangeDbFor: rangeDbFor, SILENT_DB: SILENT_DB };
+  // ---- BEAT ALIGNMENT (round 16.5) --------------------------------------------------------------
+  //
+  // A live microphone cannot be in time with the room. The sound has to cross the air to this device
+  // (~3 ms per metre), sit in the operating system's input buffer, get measured, cross the network to
+  // every phone, and then survive the phone's own attack/release smoothing. By the time the crowd
+  // lights up, the beat that caused it has passed. You cannot remove that lag — the future of a live
+  // signal is not knowable — but you can ADD to it until the flash lands on the NEXT beat, which
+  // looks perfectly in time. At 120 BPM a beat is 500 ms, so the whole correction a room ever needs
+  // is under one beat; MAX_DELAY_MS covers a beat even at a slow 40 BPM.
+  //
+  // The delay line always retains the full MAX_DELAY_MS of history regardless of the delay currently
+  // asked for, so moving the control jumps straight to a value it already holds — no silence, no
+  // refill, no waiting. That matters because the operator dials this in by ear against the room,
+  // moving the control while the crowd is watching.
+  var MAX_DELAY_MS = 1500;
+  function makeDelayLine(maxMs) {
+    var cap = Math.max(0, Number(maxMs) || MAX_DELAY_MS);
+    var t = [], v = [];
+    return {
+      // Record the level measured at time `now` (any monotonic clock, milliseconds).
+      push: function (now, level) {
+        if (!(now >= 0) || !(level >= 0)) return;
+        t.push(now); v.push(level);
+        // keep the FULL window, not just the delay in force — see the note above
+        var cutoff = now - cap - 250;
+        var drop = 0; while (drop < t.length - 1 && t[drop] < cutoff) drop++;
+        if (drop > 0) { t.splice(0, drop); v.splice(0, drop); }
+      },
+      // The level as it was `delayMs` before `now`, linearly interpolated between the two frames
+      // that straddle it. Before the line has that much history (only the first moments after the
+      // microphone starts) it returns the oldest value it holds, so the output is always continuous.
+      sample: function (now, delayMs) {
+        if (!t.length) return 0;
+        var d = Number(delayMs); if (!(d > 0)) d = 0;
+        if (d > cap) d = cap;
+        var want = now - d;
+        if (want <= t[0]) return v[0];
+        if (want >= t[t.length - 1]) return v[v.length - 1];
+        var lo = 0, hi = t.length - 1;
+        while (lo < hi - 1) { var mid = (lo + hi) >> 1; if (t[mid] <= want) lo = mid; else hi = mid; }
+        var span = t[hi] - t[lo];
+        var f = span > 0 ? (want - t[lo]) / span : 0;
+        return v[lo] + (v[hi] - v[lo]) * f;
+      },
+      // how much history is actually available right now (ms) — the meter uses it while warming up
+      span: function () { return t.length ? t[t.length - 1] - t[0] : 0; },
+      size: function () { return t.length; },
+      reset: function () { t = []; v = []; },
+    };
+  }
+  // The control is in whole milliseconds, clamped — never trust a number straight off a slider or
+  // out of a browser store.
+  function delayMsFor(value) {
+    var d = Math.round(Number(value));
+    if (!(d > 0)) return 0;
+    return d > MAX_DELAY_MS ? MAX_DELAY_MS : d;
+  }
+
+  global.CLS_MIC = { bandDb: bandDb, makeMicLevel: makeMicLevel, rangeScaleFor: rangeScaleFor, rangeDbFor: rangeDbFor,
+    makeDelayLine: makeDelayLine, delayMsFor: delayMsFor, MAX_DELAY_MS: MAX_DELAY_MS, SILENT_DB: SILENT_DB };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

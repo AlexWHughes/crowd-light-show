@@ -1068,6 +1068,9 @@
   // (<=2.8/s) still run last: the epilepsy envelope is identical to the internal-music path.
   var micStream = null, micCtx = null, micAnalyser = null, micData = null, micRaf = null;
   var micOn = false, micStarting = false, micWsAuthed = false, micStep = null, micGainV = 1;
+  // Round 16.5: the operator's beat-alignment delay. The line itself is in public/miclevel.js
+  // (unit-tested); it always holds the full window, so moving the control never leaves a gap.
+  var micDelayMs = 0, micDelayLine = null;
   var micFreq = null, micDb = -140, micFloorDb = -140, micOverDb = 0, micOpen = false;
   var micWake = null, micHttpInFlight = false;
   var micLastAt = 0, micLastSend = 0, micLevel = 0, micRms = 0, micSent = 0;
@@ -1078,7 +1081,7 @@
   var micSentLevel = 0, micPreviewLevel = 0, micPrevAt = 0;
   var MIC_HZ = 20;                       // frames/s pushed to the room (the server hard-caps at 30)
   window.__opMic = { on: false, authed: false, level: 0, rms: 0, rmsPeak: 0, sent: 0, err: null, transport: null,
-    db: -140, floorDb: -140, overDb: 0, open: false }; // test seam (rmsPeak: running peak; db/floorDb: the dB view the meter draws) (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
+    db: -140, floorDb: -140, overDb: 0, open: false, delayMs: 0, delayedLevel: 0, delaySpan: 0 }; // test seam (rmsPeak: running peak; db/floorDb: the dB view the meter draws) (rmsPeak: running peak since the capture started — a probe cannot poll fast enough to catch one)
 
   // The level maths lives in public/miclevel.js (unit-tested in test/mic_level.test.mjs). The old
   // rolling floor/ceiling normaliser that used to sit here was the wrong tool for a live microphone:
@@ -1140,7 +1143,15 @@
     window.__opMic.db = micDb; window.__opMic.floorDb = micFloorDb; window.__opMic.overDb = micOverDb; window.__opMic.open = micOpen;
     if (micRms > window.__opMic.rmsPeak) window.__opMic.rmsPeak = micRms;
     micMeterDraw();
-    if (now - micLastSend >= 1000 / MIC_HZ) { micLastSend = now; micSend(micLevel); }
+    // Record EVERY frame (~60 Hz), send at MIC_HZ. The crowd gets the level as it was
+    // micDelayMs ago, so the operator can walk the flashes onto the next beat of the room.
+    if (micDelayLine) micDelayLine.push(now, micLevel);
+    if (now - micLastSend >= 1000 / MIC_HZ) {
+      micLastSend = now;
+      var out = (micDelayLine && micDelayMs > 0) ? micDelayLine.sample(now, micDelayMs) : micLevel;
+      window.__opMic.delayedLevel = out; window.__opMic.delaySpan = micDelayLine ? micDelayLine.span() : 0;
+      micSend(out);
+    }
   }
 
   // The crowd only lights up while SOMETHING drives the screen. Switching source stops the internal
@@ -1171,6 +1182,7 @@
   function renderSource() {
     var bi = $('srcInternal'), bm = $('srcMic'), panel = $('micPanel');
     micGainLabel();
+    micDelayLabel();
     if (bi) { bi.className = micOn ? 'ghost' : 'primary'; bi.style.width = 'auto'; }
     if (bm) { bm.className = micOn ? 'primary' : 'ghost'; bm.style.width = 'auto'; }
     if (panel) { if (micOn) panel.classList.remove('hidden'); else panel.classList.add('hidden'); }
@@ -1200,6 +1212,7 @@
         micData = new Uint8Array(micAnalyser.fftSize);
         micFreq = new Float32Array(micAnalyser.frequencyBinCount);
         micStep = window.CLS_MIC.makeMicLevel(); micLastAt = 0; micLastSend = 0; micLevel = 0; micRms = 0; micDb = -140; micFloorDb = -140; micOverDb = 0; micOpen = false;
+        micDelayLine = window.CLS_MIC.makeDelayLine();   // history of a stream that no longer exists is worthless
         window.__opMic.rmsPeak = 0;
         micOn = true; micStarting = false; window.__opMic.err = null;
         renderSource();
@@ -1239,7 +1252,7 @@
     if (micRaf) { cancelAnimationFrame(micRaf); micRaf = null; }
     if (micStream) { try { micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} micStream = null; }
     if (micCtx) { try { micCtx.close(); } catch (e) {} micCtx = null; }
-    micAnalyser = null; micData = null; micFreq = null; micStep = null; micLevel = 0; micRms = 0; micOpen = false;
+    micAnalyser = null; micData = null; micFreq = null; micStep = null; micLevel = 0; micRms = 0; micOpen = false; micDelayLine = null;
     micMeterDraw(); renderSource();
     if (was) { silenceLocalPlayer(); tx('mic', { on: false }); ga('mic_source', { on: 0 }); }
     if (!quiet) srcMsg(tr('console.mic_off', 'Back to the internal music. Press Start (or GO) to play a track again.'));
@@ -1252,6 +1265,23 @@
     micGainV = (gv === gv) ? gv : 1;      // 0 is a legitimate setting — do NOT fall back to 1 on zero
     micGainLabel();
   });
+  // Beat delay. The operator dials this in by ear against the room, so it has to move live and be
+  // remembered — the same venue needs the same number every night, and re-finding it mid-set is not
+  // something anyone should have to do twice.
+  var MIC_DELAY_KEY = 'cls_mic_delay_ms';
+  function micDelayLabel() {
+    var el = $('micDelayVal'); if (!el) return;
+    el.textContent = micDelayMs > 0 ? (micDelayMs + ' ms') : tr('console.mic_delay_none', 'none');
+  }
+  function setMicDelay(ms, remember) {
+    micDelayMs = window.CLS_MIC ? window.CLS_MIC.delayMsFor(ms) : 0;
+    window.__opMic.delayMs = micDelayMs;
+    var sl = $('micDelay'); if (sl && Number(sl.value) !== micDelayMs) sl.value = String(micDelayMs);
+    micDelayLabel();
+    if (remember) { try { localStorage.setItem(MIC_DELAY_KEY, String(micDelayMs)); } catch (e) { /* private mode */ } }
+  }
+  if ($('micDelay')) $('micDelay').addEventListener('input', function () { setMicDelay($('micDelay').value, true); });
+  try { setMicDelay(localStorage.getItem(MIC_DELAY_KEY), false); } catch (e) { setMicDelay(0, false); }
   // A backgrounded or closed console must not leave the crowd on a feed nobody is producing. The
   // server releases the source on socket close and the phone decays to 0 after 1.5 s — this is the
   // polite path that fires first.
@@ -1262,7 +1292,7 @@
     if (!micOn) return;
     if (document.hidden) { srcMsg(tr('console.mic_hidden', 'Microphone paused — this page must stay open and unlocked while it drives the lights.')); }
     else {
-      micLastAt = 0; micLastSend = 0; if (window.CLS_MIC) micStep = window.CLS_MIC.makeMicLevel();   // the noise-floor estimate is stale after a gap
+      micLastAt = 0; micLastSend = 0; if (window.CLS_MIC) { micStep = window.CLS_MIC.makeMicLevel(); micDelayLine = window.CLS_MIC.makeDelayLine(); }   // the noise-floor estimate AND the delay history are stale after a gap
       if (!micRaf) micRaf = requestAnimationFrame(micFrame);
       try { if (navigator.wakeLock && !micWake) navigator.wakeLock.request('screen').then(function (w) { micWake = w; })['catch'](function () {}); } catch (e) {}
       srcMsg(tr('console.mic_live', 'LIVE from the microphone — the crowd follows what this device hears.'));

@@ -147,3 +147,99 @@ test('a dead or muted input is silence, not noise', () => {
   for (let i = 0; i < 300; i++) r = step(NaN, 16, 3);
   assert.equal(r.level, 0);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Beat alignment (round 16.5). A live microphone is always late: the sound crosses the air to the
+// console, sits in the input buffer, crosses the network, and is smoothed on every phone. You cannot
+// subtract that, so the operator ADDS delay until the flash lands on the next beat instead.
+const { makeDelayLine, delayMsFor, MAX_DELAY_MS } = globalThis.CLS_MIC;
+
+// a level that is easy to identify by value alone: level(t) == t / 10000, strictly increasing
+function fill(line, { from = 0, to = 4000, step = 1000 / 60 } = {}) {
+  for (let t = from; t <= to; t += step) line.push(t, t / 10000);
+  return to;
+}
+
+test('with no delay the crowd gets the level measured right now', () => {
+  const line = makeDelayLine();
+  const now = fill(line);
+  assert.ok(Math.abs(line.sample(now, 0) - now / 10000) < 1e-6, 'delay 0 must be the newest frame');
+});
+
+test('a delay of D returns the level from D milliseconds ago', () => {
+  const line = makeDelayLine();
+  const now = fill(line);
+  for (const d of [100, 250, 500, 900, 1200]) {
+    const got = line.sample(now, d), want = (now - d) / 10000;
+    assert.ok(Math.abs(got - want) < 2e-4, `delay ${d} ms gave ${got.toFixed(5)}, expected ${want.toFixed(5)}`);
+  }
+});
+
+test('the delay is clamped to the window, and junk never reaches the crowd', () => {
+  const line = makeDelayLine();
+  const now = fill(line, { to: 6000 });
+  assert.equal(line.sample(now, 99999), line.sample(now, MAX_DELAY_MS), 'past the window it must pin at the maximum');
+  for (const bad of [NaN, -50, 'abc', null, undefined]) {
+    const v = line.sample(now, bad);
+    assert.ok(Number.isFinite(v) && v >= 0 && v <= 1, `sample(${String(bad)}) returned ${v}`);
+  }
+  assert.deepEqual([-5, 0, 7.4, 480, 99999, 'abc', NaN].map(delayMsFor), [0, 0, 7, 480, MAX_DELAY_MS, 0, 0]);
+});
+
+test('moving the control takes effect at once — the line always holds the whole window', () => {
+  // THE POINT: the operator turns this knob by ear while the crowd is watching. If the line only
+  // kept the delay currently in force, raising it would leave a gap to refill and the lights would
+  // stall for up to a second and a half every time he nudged it.
+  const line = makeDelayLine();
+  const now = fill(line, { to: 5000 });
+  const before = line.sample(now, 200);
+  const after = line.sample(now, 1200);
+  assert.ok(Math.abs(before - (now - 200) / 10000) < 2e-4);
+  assert.ok(Math.abs(after - (now - 1200) / 10000) < 2e-4, 'a big jump in the control must be served from history already held');
+  assert.ok(line.span() >= MAX_DELAY_MS, `only ${Math.round(line.span())} ms of history was retained`);
+});
+
+test('before it has that much history it stays continuous instead of going dark', () => {
+  const line = makeDelayLine();
+  // start the clock away from zero so "the oldest frame" is a value we can tell apart from silence
+  const now = fill(line, { from: 9000, to: 9300 });   // the microphone has only just started
+  const v = line.sample(now, 1200);
+  assert.ok(Math.abs(v - 0.9) < 1e-6, `a cold line returned ${v}; it must serve its oldest frame (0.9), not silence`);
+  assert.equal(v, line.sample(now, 99999), 'anything older than the line holds must read as its oldest frame');
+  // and it must not sit there for ever: once the history covers the request, the delay is honoured
+  for (let t = 9300 + 1000 / 60; t <= 10600; t += 1000 / 60) line.push(t, t / 10000);
+  assert.ok(Math.abs(line.sample(10600, 1200) - 0.94) < 5e-4, 'the requested delay must take over as soon as the history reaches back that far');
+});
+
+test('memory is bounded over a long set', () => {
+  const line = makeDelayLine();
+  for (let t = 0; t < 60 * 60 * 1000; t += 1000 / 60) line.push(t, (t % 1000) / 1000);   // an hour at 60 fps
+  assert.ok(line.size() < 200, `the line grew to ${line.size()} frames over an hour`);
+  assert.ok(line.span() >= MAX_DELAY_MS && line.span() < MAX_DELAY_MS + 400, `retained window is ${Math.round(line.span())} ms`);
+});
+
+test('a stuttering frame rate does not shift the alignment', () => {
+  // requestAnimationFrame is not a metronome: a busy phone drops frames. The mapping is by
+  // TIMESTAMP, so a stutter must not move where a given delay lands.
+  const line = makeDelayLine();
+  let t = 0;
+  const gaps = [16, 16, 120, 16, 8, 60, 16, 16, 33, 16];
+  for (let i = 0; t <= 5000; i++) { line.push(t, t / 10000); t += gaps[i % gaps.length]; }
+  const now = t - gaps[9];
+  const got = line.sample(now, 700);
+  assert.ok(Math.abs(got - (now - 700) / 10000) < 5e-4, `a stuttering feed put 700 ms of delay at ${(got * 10000).toFixed(0)} ms instead of ${(now - 700).toFixed(0)}`);
+});
+
+test('delaying cannot invent brightness the microphone never heard', () => {
+  // Safety argument, made explicit: the delayed stream is a time SHIFT of an already-governed
+  // stream. Every value it can ever emit is one the undelayed stream also emitted (or lies between
+  // two neighbouring ones), so no delay setting can push the crowd brighter than the room did.
+  const line = makeDelayLine();
+  const seen = [];
+  for (let t = 0; t <= 4000; t += 1000 / 60) { const v = 0.5 + 0.5 * Math.sin(t / 120); line.push(t, v); seen.push(v); }
+  const hi = Math.max(...seen);
+  for (let d = 0; d <= MAX_DELAY_MS; d += 25) {
+    const v = line.sample(4000, d);
+    assert.ok(v <= hi + 1e-9, `delay ${d} produced ${v}, above the loudest frame the microphone actually heard (${hi})`);
+  }
+});
