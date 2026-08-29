@@ -71,8 +71,13 @@ async function main() {
   await upload(op, 'mine-long.wav', 14, 660);
 
   // his setup: "loop selected" with both of his own uploads ticked
-  const roomBeforeTicking = await op.evaluate(() => window.__opState.pubTrackId);
   await op.evaluate(() => { const b = document.querySelector('[data-plmode="selected"]'); if (b) b.click(); });
+  await sleep(2500);
+  // Anchors taken AFTER the mode switch has settled: ticking a box must change nothing about what is
+  // playing. It used to re-arm and re-GO on a fresh T0 even when the ticked track was already the one
+  // playing, so the song jumped back to 0:00 on every click.
+  const roomBeforeTicking = await op.evaluate(() => window.__opState.pubTrackId);
+  const t0BeforeTicking = await ph.evaluate(() => window.__cls.gotStart);
   await sleep(800);
   await op.evaluate(() => {
     document.querySelectorAll('input[data-plsel]').forEach((c) => {
@@ -87,6 +92,11 @@ async function main() {
   // the server asked "is the armed track a number?" instead of "is it still in the order?".
   check('ticking_a_box_does_not_restart_the_room_on_another_track', before.room === roomBeforeTicking,
     `playing ${roomBeforeTicking} before the selection was touched, ${before.room} after`);
+  const t0AfterTicking = await ph.evaluate(() => window.__cls.gotStart);
+  check('ticking_a_box_does_not_restart_the_song_from_zero', t0AfterTicking === t0BeforeTicking,
+    t0AfterTicking === t0BeforeTicking
+      ? 'the show clock was untouched by the selection'
+      : `the show was re-started on a new anchor (T0 ${t0BeforeTicking} -> ${t0AfterTicking}) — the song jumped back to 0:00`);
   const selCount = await op.evaluate(() => (window.__opState.plSelected || []).filter((x) => String(x).indexOf('g:') === 0).length);
   check('two_guest_uploads_are_selected', selCount === 2,
     `the room is looping the visitor's own uploads (now on ${before.room}, ${before.dur} ms)`);
