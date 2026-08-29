@@ -15,7 +15,7 @@
     },
     "preview_is_anchored_to_the_room": {
       "ok": true,
-      "detail": "the console renders the preview off the room's own preset anchor (startedAt=12181.028199999942, clock synced=true)"
+      "detail": "the console renders the preview off the room's own preset anchor (startedAt=13495.128900000127, clock synced=true)"
     },
     "preview_matches_the_crowd": {
       "ok": true,
@@ -31,7 +31,7 @@
     },
     "source_switch_silences_the_operators_own_player": {
       "ok": true,
-      "detail": "the console's <audio> was playing (t=1.1s) and the source switch stopped it (paused=true, t=0.0s, muted=true)"
+      "detail": "the console's <audio> was playing (t=1.2s) and the source switch stopped it (paused=true, t=0.0s, muted=true)"
     },
     "switch_back_leaves_the_player_silent": {
       "ok": true,

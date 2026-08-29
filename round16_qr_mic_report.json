@@ -3,7 +3,7 @@
   "checks": {
     "qr_serves_png": {
       "ok": true,
-      "detail": "status=200 type=image/png bytes=3730"
+      "detail": "status=200 type=image/png bytes=3642"
     },
     "qr_cacheable": {
       "ok": true,
@@ -11,7 +11,7 @@
     },
     "qr_encodes_main_join_url": {
       "ok": true,
-      "detail": "served == QR(\"http://localhost:5603/join?s=276669\") : true"
+      "detail": "served == QR(\"http://localhost:5603/join?s=787787\") : true"
     },
     "qr_room_scoped": {
       "ok": true,
@@ -43,7 +43,7 @@
     },
     "qr_does_not_stop_the_show": {
       "ok": true,
-      "detail": "everLit=true lastBg=rgb(44,15,84) frames=152"
+      "detail": "everLit=true lastBg=rgb(43,15,84) frames=152"
     },
     "qr_hide_button": {
       "ok": true,
@@ -75,7 +75,7 @@
     },
     "mic_level_tracks_the_feed": {
       "ok": true,
-      "detail": "loud level=0.95 quiet level=0.02 frames=45"
+      "detail": "loud level=0.95 quiet level=0.02 frames=44"
     },
     "mic_drives_the_crowd_screen": {
       "ok": true,
@@ -83,11 +83,11 @@
     },
     "mic_respects_flash_governor": {
       "ok": true,
-      "detail": "1 flashes in 3.2s = 0.31/s under a 10 Hz square-wave mic feed (WCAG 2.3.2 cap is 3/s)"
+      "detail": "1 flashes in 3.3s = 0.30/s under a 10 Hz square-wave mic feed (WCAG 2.3.2 cap is 3/s)"
     },
     "mic_rate_capped": {
       "ok": true,
-      "detail": "4 frames reached the phone in 0.23s = 17.6/s (server cap 30/s)"
+      "detail": "4 frames reached the phone in 0.27s = 14.8/s (server cap 30/s)"
     },
     "mic_clamps_out_of_range": {
       "ok": true,
@@ -147,7 +147,7 @@
     },
     "e2e_mic_capture_running": {
       "ok": true,
-      "detail": "getUserMedia is live: peak rms=0.5327 peak level=1.00 over 2.4s · frames sent=95 over ws"
+      "detail": "getUserMedia is live: peak rms=0.5429 peak level=0.31 over 2.4s · frames sent=93 over ws"
     },
     "e2e_mic_panel_shown": {
       "ok": true,
@@ -155,11 +155,11 @@
     },
     "e2e_phone_follows_the_microphone": {
       "ok": true,
-      "detail": "the phone is on the mic source with 90 frames, running preset \"pulse\" (rgb [94,45,164])"
+      "detail": "the phone is on the mic source with 88 frames, running preset \"pulse\" (rgb [56,19,108])"
     },
     "e2e_level_actually_modulates": {
       "ok": true,
-      "detail": "phone-side level swing over 2.4s = 0.538 (min 0.03 max 0.57)"
+      "detail": "phone-side level swing over 2.4s = 0.594 (min 0.04 max 0.64)"
     },
     "e2e_switch_back_to_internal": {
       "ok": true,

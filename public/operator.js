@@ -458,7 +458,41 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'op', cmd: 'go', T0: T0 }));
   }
   // public GO: server-timed; the console hears the start broadcast and aligns its sound to it.
-  function doGoPublic() { if ($('go')) $('go').textContent = '● starting…'; tx('go', {}); }
+  // The room lives in the SERVER's memory. When the server restarts — a deploy, a crash, an OOM kill
+  // — this console's token still works and the page reconnects looking perfectly healthy, but the
+  // room no longer knows which track was armed, so every 'go' comes back refused. The console used
+  // to drop that answer on the floor: the button sat on 'Starting…' for ever and the music never
+  // came back (Andrii hit exactly this mid-show). The console holds the truth about what is armed,
+  // so re-arm it and go again; if even that track is gone with the server's memory, fall back to the
+  // house default rather than leaving a crowd in the dark.
+  function goFailed() {
+    if ($('go')) $('go').textContent = '▶ GO';
+    if (playUiState === 'loading' || playUiState === 'playing') setPlayUI('idle');
+    if ($('armed')) $('armed').textContent = tr('console.start_failed', 'could not start — press Start again');
+  }
+  function doGoPublic(isRetry) {
+    if ($('go')) $('go').textContent = '● starting…';
+    tx('go', {}).then(function (j) {
+      if (j && j.ok) return;
+      if (isRetry) { goFailed(); return; }
+      var def = DEFAULTS && DEFAULTS.default_track_id;
+      var again = function (id) {
+        return tx('arm', { trackId: id, keepPreset: true }).then(function (a) { return !!(a && a.ok); });
+      };
+      var first = (armedId != null) ? again(armedId) : Promise.resolve(false);
+      first.then(function (ok) {
+        if (ok) { doGoPublic(true); return; }
+        if (def != null && def !== armedId) {
+          again(Number(def)).then(function (ok2) {
+            if (!ok2) { goFailed(); return; }
+            armedId = Number(def); loadPublic(); fetchConsoleAudio(armedId); doGoPublic(true);
+          });
+          return;
+        }
+        goFailed();
+      });
+    });
+  }
 
   if ($('go')) $('go').addEventListener('click', function () {
     if (armedId == null) { alert(PUBLIC ? 'Pick a track first.' : 'Arm a track first.'); return; }
